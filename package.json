@@ -1,7 +1,11 @@
 {
-  "name": "cabable-platform",
-  "private": true,
+  "name": "capable-root",
   "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
   "type": "module",
   "scripts": {
     "dev": "vite --host",

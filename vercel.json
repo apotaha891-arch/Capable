@@ -4,5 +4,9 @@
   "framework": "vite",
   "env": {
     "VITE_APP_URL": "@vite_app_url"
-  }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/backend/server.js" },
+    { "source": "/(.*)", "destination": "/frontend/index.html" }
+  ]
 }

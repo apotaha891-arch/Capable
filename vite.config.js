@@ -1,12 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  server: {
-    port: 3000,
-    open: true
-  },
-  build: {
-    outDir: 'dist',
-    emptyOutDir: true
-  }
+  // This is a root vite config, likely not used directly for the frontend
+  // The frontend has its own vite.config.js
+  root: './frontend',
 });
