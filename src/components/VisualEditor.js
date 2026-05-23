@@ -394,8 +394,50 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
       `;
     });
 
+    const currentProvider = localStorage.getItem('copilot_provider') || 'offline';
+    const settingsOpen = localStorage.getItem('copilot_settings_open') === 'true';
+
     container.innerHTML = `
       <div class="copilot-chat-container">
+        <!-- Collapsible Settings Panel -->
+        <details class="copilot-settings-details" style="background: var(--bg-base); border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: 8px;" ${settingsOpen ? 'open' : ''}>
+          <summary style="font-size: 0.75rem; font-weight: 700; cursor: pointer; color: var(--text-secondary); user-select: none;">
+            ⚙️ AI Provider (إعدادات الذكاء الاصطناعي)
+          </summary>
+          <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+            <div class="input-group" style="margin-bottom: 0;">
+              <label class="input-label" style="font-size: 0.7rem; color: var(--text-muted);">Provider (المزود)</label>
+              <select class="input-field" id="copilot-provider-select" style="font-size: 0.8rem; padding: 6px 10px;">
+                <option value="offline" ${currentProvider === 'offline' ? 'selected' : ''}>Offline Fallback (محلي بدون إنترنت)</option>
+                <option value="ollama" ${currentProvider === 'ollama' ? 'selected' : ''}>Ollama (Local LLM)</option>
+                <option value="huggingface" ${currentProvider === 'huggingface' ? 'selected' : ''}>Hugging Face API</option>
+              </select>
+            </div>
+            
+            <div id="copilot-settings-hf" style="display: ${currentProvider === 'huggingface' ? 'flex' : 'none'}; flex-direction: column; gap: 8px;">
+              <div class="input-group" style="margin-bottom: 0;">
+                <label class="input-label" style="font-size: 0.7rem; color: var(--text-muted);">API Token (مفتاح API)</label>
+                <input type="password" class="input-field" id="copilot-hf-token" value="${localStorage.getItem('copilot_hf_token') || ''}" placeholder="hf_..." style="font-size: 0.8rem; padding: 6px 10px;" />
+              </div>
+              <div class="input-group" style="margin-bottom: 0;">
+                <label class="input-label" style="font-size: 0.7rem; color: var(--text-muted);">Model ID (الموديل)</label>
+                <input type="text" class="input-field" id="copilot-hf-model" value="${localStorage.getItem('copilot_hf_model') || 'meta-llama/Meta-Llama-3-8B-Instruct'}" style="font-size: 0.8rem; padding: 6px 10px; font-family: monospace;" />
+              </div>
+            </div>
+
+            <div id="copilot-settings-ollama" style="display: ${currentProvider === 'ollama' ? 'flex' : 'none'}; flex-direction: column; gap: 8px;">
+              <div class="input-group" style="margin-bottom: 0;">
+                <label class="input-label" style="font-size: 0.7rem; color: var(--text-muted);">Ollama Host (الرابط)</label>
+                <input type="text" class="input-field" id="copilot-ollama-host" value="${localStorage.getItem('copilot_ollama_host') || 'http://localhost:11434'}" style="font-size: 0.8rem; padding: 6px 10px; font-family: monospace;" />
+              </div>
+              <div class="input-group" style="margin-bottom: 0;">
+                <label class="input-label" style="font-size: 0.7rem; color: var(--text-muted);">Model Name (اسم الموديل)</label>
+                <input type="text" class="input-field" id="copilot-ollama-model" value="${localStorage.getItem('copilot_ollama_model') || 'llama3'}" style="font-size: 0.8rem; padding: 6px 10px; font-family: monospace;" />
+              </div>
+            </div>
+          </div>
+        </details>
+
         <div class="copilot-messages" id="copilot-msg-stream">
           ${messagesHtml}
         </div>
@@ -422,9 +464,58 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
     const stream = document.getElementById('copilot-msg-stream');
     if (stream) stream.scrollTop = stream.scrollHeight;
 
-    // Event handlers
+    // Grab elements
+    const detailsEl = container.querySelector('.copilot-settings-details');
+    const providerSelect = document.getElementById('copilot-provider-select');
+    const hfSettings = document.getElementById('copilot-settings-hf');
+    const ollamaSettings = document.getElementById('copilot-settings-ollama');
+    const hfToken = document.getElementById('copilot-hf-token');
+    const hfModel = document.getElementById('copilot-hf-model');
+    const ollamaHost = document.getElementById('copilot-ollama-host');
+    const ollamaModel = document.getElementById('copilot-ollama-model');
+
     const inputField = document.getElementById('copilot-input-field');
     const sendBtn = document.getElementById('copilot-send-btn');
+
+    // Bind settings events
+    if (detailsEl) {
+      detailsEl.addEventListener('toggle', () => {
+        localStorage.setItem('copilot_settings_open', detailsEl.open);
+      });
+    }
+
+    if (providerSelect) {
+      providerSelect.addEventListener('change', () => {
+        const val = providerSelect.value;
+        localStorage.setItem('copilot_provider', val);
+        hfSettings.style.display = val === 'huggingface' ? 'flex' : 'none';
+        ollamaSettings.style.display = val === 'ollama' ? 'flex' : 'none';
+      });
+    }
+
+    if (hfToken) {
+      hfToken.addEventListener('change', () => {
+        localStorage.setItem('copilot_hf_token', hfToken.value.trim());
+      });
+    }
+
+    if (hfModel) {
+      hfModel.addEventListener('change', () => {
+        localStorage.setItem('copilot_hf_model', hfModel.value.trim());
+      });
+    }
+
+    if (ollamaHost) {
+      ollamaHost.addEventListener('change', () => {
+        localStorage.setItem('copilot_ollama_host', ollamaHost.value.trim());
+      });
+    }
+
+    if (ollamaModel) {
+      ollamaModel.addEventListener('change', () => {
+        localStorage.setItem('copilot_ollama_model', ollamaModel.value.trim());
+      });
+    }
 
     const handleSend = () => {
       const promptText = inputField.value.trim();
@@ -443,15 +534,25 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
       const stream = document.getElementById('copilot-msg-stream');
       if (stream) stream.scrollTop = stream.scrollHeight;
 
-      setTimeout(() => {
-        const responseText = processCopilotCommand(promptText);
+      setTimeout(async () => {
+        let responseText = '';
+        try {
+          responseText = await processCopilotCommandAsync(promptText);
+        } catch (err) {
+          console.warn("AI LLM failed, falling back to offline parser:", err);
+          const offlineResponse = processCopilotCommand(promptText);
+          const isAR = appState.lang === 'ar';
+          responseText = isAR 
+            ? `⚠️ (فشل الاتصال بالنموذج: ${err.message}. تم استخدام المحلل المحلي الاحتياطي.)\n\n${offlineResponse}`
+            : `⚠️ (API Connection failed: ${err.message}. Offline fallback used.)\n\n${offlineResponse}`;
+        }
         
         if (typingIndicator) typingIndicator.style.display = 'none';
 
         // Add assistant message
         history.push({ sender: 'assistant', text: responseText });
         renderCopilotTab(container);
-      }, 1000);
+      }, 500);
     };
 
     sendBtn.addEventListener('click', handleSend);
@@ -930,6 +1031,127 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
       panel.style.display = 'none';
       renderCanvasPreview();
     });
+  }
+
+  // --- AI Copilot Async Integration (Ollama / Hugging Face) ---
+  async function processCopilotCommandAsync(text) {
+    const provider = localStorage.getItem('copilot_provider') || 'offline';
+    
+    if (provider === 'offline') {
+      return processCopilotCommand(text);
+    }
+
+    const systemPrompt = `You are a professional website builder AI. You receive the current website project JSON and a user editing instruction. Your task is to modify the project JSON according to the instruction.
+    
+    Here is the project JSON schema:
+    - name: string (the website title/name)
+    - description: string
+    - theme: 'theme-sunset' | 'theme-emerald' | 'theme-midnight' | 'theme-corporate'
+    - font: 'font-arabic' | 'font-english'
+    - sections: array of section objects. Each section has:
+      - id: string (unique identifier)
+      - type: 'hero' | 'features' | 'gallery' | 'contact' | 'footer'
+      - content: object depending on type.
+        - hero: { title, subtitle, ctaText, ctaLink }
+        - features: { title, subtitle, items: [{ icon, title, desc }] }
+        - gallery: { title, subtitle, items: [{ url, caption }] }
+        - contact: { title, subtitle, fields: array of ('name'|'phone'|'email'|'date'|'notes') }
+        - footer: { text, links }
+
+    You MUST respond ONLY with the updated project JSON object. Do not wrap it in markdown codeblocks (like \`\`\`json) or add any conversational text. Return only valid raw JSON.`;
+
+    const userPrompt = `Current Project JSON:\n${JSON.stringify(project)}\n\nUser Instruction:\n${text}`;
+
+    if (provider === 'ollama') {
+      const host = localStorage.getItem('copilot_ollama_host') || 'http://localhost:11434';
+      const model = localStorage.getItem('copilot_ollama_model') || 'llama3';
+
+      const res = await fetch(`${host}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ],
+          stream: false
+        })
+      });
+
+      if (!res.ok) throw new Error(`Ollama returned status ${res.status}`);
+      const data = await res.json();
+      const content = data.message?.content || data.response || '';
+      return applyUpdatedProjectJSON(content);
+    }
+
+    if (provider === 'huggingface') {
+      const token = localStorage.getItem('copilot_hf_token') || '';
+      const model = localStorage.getItem('copilot_hf_model') || 'meta-llama/Meta-Llama-3-8B-Instruct';
+
+      const hfPrompt = `<|system|>\n${systemPrompt}\n<|user|>\n${userPrompt}\n<|assistant|>\n`;
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({
+          inputs: hfPrompt,
+          parameters: { max_new_tokens: 1500, return_full_text: false }
+        })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Hugging Face returned status ${res.status}`);
+      }
+
+      const data = await res.json();
+      const generatedText = Array.isArray(data) ? data[0].generated_text : data.generated_text || '';
+      return applyUpdatedProjectJSON(generatedText);
+    }
+  }
+
+  function applyUpdatedProjectJSON(responseText) {
+    try {
+      const cleanJson = extractJSON(responseText);
+      const updated = JSON.parse(cleanJson);
+
+      if (!updated.sections || !Array.isArray(updated.sections)) {
+        throw new Error("Invalid project structure returned by AI model.");
+      }
+
+      project.name = updated.name || project.name;
+      project.description = updated.description || project.description;
+      project.theme = updated.theme || project.theme;
+      project.font = updated.font || project.font;
+      project.sections = updated.sections;
+
+      const titleEl = document.getElementById('editor-project-title');
+      if (titleEl) titleEl.innerText = project.name;
+      saveProjectState();
+      renderCanvasPreview();
+
+      return appState.lang === 'ar' 
+        ? "✨ تم تطبيق تعديلات الذكاء الاصطناعي بنجاح وتحديث التصميم!" 
+        : "✨ AI modifications successfully applied and design updated!";
+    } catch (e) {
+      console.error("Failed to parse LLM response as JSON:", responseText, e);
+      throw new Error(`Failed to apply AI changes: ${e.message}`);
+    }
+  }
+
+  function extractJSON(text) {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start !== -1 && end !== -1 && end > start) {
+      return text.substring(start, end + 1);
+    }
+    throw new Error("No JSON object found in response");
   }
 
   return html;
