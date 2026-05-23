@@ -1,0 +1,320 @@
+/* preview.css */
+
+/* Scoped Theme Variables for Deployed/Simulated Websites */
+.web-preview {
+  --web-primary: #3b82f6;
+  --web-primary-hover: #2563eb;
+  --web-bg-1: #ffffff;
+  --web-bg-2: #f3f4f6;
+  --web-text-main: #111827;
+  --web-text-muted: #4b5563;
+  --web-border: #e5e7eb;
+  --web-btn-text: #ffffff;
+  --web-font-family: inherit;
+  
+  font-family: var(--web-font-family);
+  background-color: var(--web-bg-1);
+  color: var(--web-text-main);
+  line-height: 1.6;
+  width: 100%;
+  min-height: 100%;
+}
+
+/* Theme Options overrides */
+.web-preview.theme-midnight {
+  --web-primary: #8b5cf6;
+  --web-primary-hover: #7c3aed;
+  --web-bg-1: #0f172a;
+  --web-bg-2: #1e293b;
+  --web-text-main: #f8fafc;
+  --web-text-muted: #94a3b8;
+  --web-border: #334155;
+  --web-btn-text: #ffffff;
+}
+
+.web-preview.theme-emerald {
+  --web-primary: #10b981;
+  --web-primary-hover: #059669;
+  --web-bg-1: #f4f6f4;
+  --web-bg-2: #e6ebe6;
+  --web-text-main: #1f2937;
+  --web-text-muted: #4b5563;
+  --web-border: #d1d5db;
+  --web-btn-text: #ffffff;
+}
+
+.web-preview.theme-sunset {
+  --web-primary: #f97316;
+  --web-primary-hover: #ea580c;
+  --web-bg-1: #18181b;
+  --web-bg-2: #27272a;
+  --web-text-main: #fafafa;
+  --web-text-muted: #a1a1aa;
+  --web-border: #3f3f46;
+  --web-btn-text: #ffffff;
+}
+
+.web-preview.theme-corporate {
+  --web-primary: #1e3a8a;
+  --web-primary-hover: #172554;
+  --web-bg-1: #ffffff;
+  --web-bg-2: #f8fafc;
+  --web-text-main: #0f172a;
+  --web-text-muted: #475569;
+  --web-border: #e2e8f0;
+  --web-btn-text: #ffffff;
+}
+
+/* Layout helper utilities */
+.web-section {
+  padding: 80px 5%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-bottom: 1px solid var(--web-border);
+  position: relative;
+  background-color: var(--web-bg-1);
+}
+
+.web-section:nth-child(even) {
+  background-color: var(--web-bg-2);
+}
+
+.web-container {
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+/* Sections Detail Styling */
+
+/* Hero */
+.web-hero {
+  text-align: center;
+  padding: 100px 5% 80px;
+}
+
+.web-hero-title {
+  font-size: 2.8rem;
+  font-weight: 800;
+  color: var(--web-text-main);
+  max-width: 800px;
+  margin: 0 auto 16px;
+  line-height: 1.2;
+}
+
+.web-hero-desc {
+  font-size: 1.2rem;
+  color: var(--web-text-muted);
+  max-width: 600px;
+  margin: 0 auto 30px;
+}
+
+.web-btn {
+  background-color: var(--web-primary);
+  color: var(--web-btn-text);
+  padding: 12px 28px;
+  border-radius: 8px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: background-color 0.2s ease;
+}
+
+.web-btn:hover {
+  background-color: var(--web-primary-hover);
+}
+
+/* Features Grid */
+.web-section-title {
+  font-size: 2rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.web-section-subtitle {
+  font-size: 1.05rem;
+  color: var(--web-text-muted);
+  text-align: center;
+  max-width: 500px;
+  margin: 0 auto 40px;
+}
+
+.web-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 30px;
+  width: 100%;
+}
+
+.web-card {
+  background-color: var(--web-bg-1);
+  border: 1px solid var(--web-border);
+  padding: 30px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  transition: transform 0.2s ease;
+}
+
+.web-preview.theme-midnight .web-card, 
+.web-preview.theme-sunset .web-card {
+  background-color: var(--web-bg-2);
+}
+
+.web-card:hover {
+  transform: translateY(-4px);
+}
+
+.web-card-icon {
+  font-size: 2.2rem;
+  color: var(--web-primary);
+}
+
+.web-card-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.web-card-desc {
+  font-size: 0.95rem;
+  color: var(--web-text-muted);
+  line-height: 1.5;
+}
+
+/* Gallery Grid */
+.web-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 20px;
+  width: 100%;
+}
+
+.web-gallery-item {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  aspect-ratio: 4/3;
+  border: 1px solid var(--web-border);
+  cursor: pointer;
+  background-color: var(--web-bg-2);
+}
+
+.web-gallery-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.web-gallery-item:hover img {
+  transform: scale(1.05);
+}
+
+.web-gallery-caption {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(0deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
+  padding: 20px 15px 10px;
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Contact Form */
+.web-contact-form {
+  max-width: 500px;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.web-input, .web-textarea {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--web-border);
+  background-color: var(--web-bg-1);
+  color: var(--web-text-main);
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+.web-preview.theme-midnight .web-input,
+.web-preview.theme-midnight .web-textarea,
+.web-preview.theme-sunset .web-input,
+.web-preview.theme-sunset .web-textarea {
+  background-color: var(--web-bg-2);
+}
+
+.web-input:focus, .web-textarea:focus {
+  outline: none;
+  border-color: var(--web-primary);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+}
+
+.web-textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
+.web-contact-success {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  padding: 12px 16px;
+  border-radius: 6px;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  text-align: center;
+  font-weight: 600;
+  display: none;
+  animation: fadeIn 0.3s ease;
+}
+
+/* Footer */
+.web-footer {
+  padding: 40px 5%;
+  background-color: var(--web-bg-2);
+  border-top: 1px solid var(--web-border);
+  text-align: center;
+  color: var(--web-text-muted);
+  font-size: 0.9rem;
+}
+
+.web-preview.theme-midnight .web-footer,
+.web-preview.theme-sunset .web-footer {
+  background-color: #090d16;
+}
+
+.web-footer-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 15px;
+}
+
+/* Simulator layout styles */
+.simulator-empty-canvas {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  color: var(--text-muted);
+}
+.simulator-empty-canvas span {
+  font-size: 3rem;
+}

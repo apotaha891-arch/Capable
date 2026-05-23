@@ -1,0 +1,105 @@
+/* variables.css */
+:root {
+  /* Brand Colors */
+  --primary-hue: 256;
+  --primary: hsl(var(--primary-hue), 90%, 60%);
+  --primary-hover: hsl(var(--primary-hue), 90%, 50%);
+  --primary-glow: hsla(var(--primary-hue), 90%, 60%, 0.15);
+  
+  --secondary-hue: 180;
+  --secondary: hsl(var(--secondary-hue), 100%, 45%);
+  --secondary-hover: hsl(var(--secondary-hue), 100%, 38%);
+  --secondary-glow: hsla(var(--secondary-hue), 100%, 45%, 0.15);
+
+  --accent-hue: 320;
+  --accent: hsl(var(--accent-hue), 90%, 55%);
+
+  /* Neutral Dark Theme */
+  --bg-base: hsl(224, 71%, 4%);
+  --bg-surface: hsl(224, 60%, 8%);
+  --bg-card: hsla(224, 60%, 12%, 0.6);
+  --bg-card-hover: hsla(224, 60%, 16%, 0.8);
+  
+  --border-light: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(255, 255, 255, 0.25);
+  --border-active: hsl(var(--primary-hue), 90%, 60%);
+
+  /* Text Colors */
+  --text-primary: hsl(210, 40%, 98%);
+  --text-secondary: hsl(215, 20%, 75%);
+  --text-muted: hsl(215, 16%, 50%);
+  
+  /* Typography & Transitions */
+  --font-arabic: 'Cairo', system-ui, -apple-system, sans-serif;
+  --font-english: 'Outfit', system-ui, -apple-system, sans-serif;
+  --font-family: var(--font-arabic); /* default */
+
+  --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 24px;
+  --radius-full: 9999px;
+
+  --shadow-sm: 0 2px 8px -2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 8px 24px -4px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 16px 40px -8px rgba(0, 0, 0, 0.8);
+  --shadow-glow: 0 0 24px var(--primary-glow);
+  
+  --glass-bg: rgba(10, 14, 26, 0.7);
+  --glass-backdrop: blur(16px);
+  --glass-border: rgba(255, 255, 255, 0.06);
+}
+
+/* Light Theme overrides - if user requests, but we defaults to high fidelity dark-slate UI */
+:root[data-theme="light"] {
+  --bg-base: hsl(220, 20%, 97%);
+  --bg-surface: hsl(220, 20%, 93%);
+  --bg-card: rgba(255, 255, 255, 0.75);
+  --bg-card-hover: rgba(255, 255, 255, 0.9);
+  
+  --border-light: rgba(0, 0, 0, 0.08);
+  --border-focus: rgba(0, 0, 0, 0.2);
+  --border-active: hsl(var(--primary-hue), 90%, 50%);
+
+  --text-primary: hsl(224, 71%, 4%);
+  --text-secondary: hsl(220, 15%, 35%);
+  --text-muted: hsl(220, 10%, 55%);
+  
+  --glass-bg: rgba(255, 255, 255, 0.8);
+  --glass-border: rgba(0, 0, 0, 0.06);
+}
+
+/* RTL & LTR Language Adjustments */
+:root[dir="rtl"] {
+  --font-family: var(--font-arabic);
+  --text-align-start: right;
+  --text-align-end: left;
+  --direction-sign: 1;
+}
+
+:root[dir="ltr"] {
+  --font-family: var(--font-english);
+  --text-align-start: left;
+  --text-align-end: right;
+  --direction-sign: -1;
+}
+
+/* Standard Box Reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  line-height: 1.5;
+  overflow-x: hidden;
+  direction: inherit;
+  transition: background-color var(--transition-normal), color var(--transition-normal);
+}
