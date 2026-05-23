@@ -237,7 +237,10 @@ function startGenerationProcess(appState, prompt, config, onGenerated, modalOver
           finalizeGeneration(newProject);
         } catch (err) {
           console.error('AI generation failed', err);
-          failGeneration(trans.aiErrorMessage || (appState.lang === 'ar' ? 'تعذر إكمال توليد الموقع. يرجى المحاولة مرة أخرى.' : 'Site generation failed. Please try again.'));
+          const detailMsg = trans.aiErrorMessage 
+            ? `${trans.aiErrorMessage} (${err.message})`
+            : (appState.lang === 'ar' ? `تعذر إكمال توليد الموقع: ${err.message}` : `Site generation failed: ${err.message}`);
+          failGeneration(detailMsg);
         }
       }, 500);
     }

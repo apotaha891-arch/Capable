@@ -174,7 +174,11 @@ export const storage = {
       return DEFAULT_SYSTEM_PROJECTS;
     }
     try {
-      return JSON.parse(projects);
+      const parsed = JSON.parse(projects);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+      return DEFAULT_SYSTEM_PROJECTS;
     } catch (e) {
       return DEFAULT_SYSTEM_PROJECTS;
     }
