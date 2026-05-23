@@ -465,14 +465,36 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
 
   // --- AI Copilot Natural Language Parser & Action Handler ---
   function processCopilotCommand(text) {
-    const lowercase = text.toLowerCase().trim();
     const isAR = appState.lang === 'ar';
+    const trans = appState.translations;
 
-    const hasWord = (keywords) => keywords.some(k => lowercase.includes(k));
+    // Helper: Normalize string (handles Arabic Alif, Teh Marbuta, Yeh, and diacritics)
+    const normalize = (str) => {
+      if (!str) return "";
+      return str.toLowerCase().trim()
+        .replace(/[أإآ]/g, 'ا')
+        .replace(/ة/g, 'ه')
+        .replace(/ى/g, 'ي')
+        .replace(/[\u064B-\u065F]/g, '');
+    };
+
+    const normalizedInput = normalize(text);
+    
+    // Helper to check if a keyword matches
+    const hasWord = (keywords) => {
+      const normalizedKeywords = keywords.map(k => normalize(k));
+      return normalizedKeywords.some(k => normalizedInput.includes(k));
+    };
+
+    // Special context handler for incomplete name/title complaints
+    if (hasWord(['ناقص', 'مفقود', 'غير مكتمل', 'ناقصه', 'مبتور', 'تكملة', 'تكمله']) && hasWord(['اسم', 'عنوان', 'المنشاه', 'الشركة', 'الموقع', 'المؤسسة'])) {
+      return isAR
+        ? "عذراً على ذلك! يبدو أن اسم المنشأة غير مكتمل بالفعل في عنوان الموقع.\n\nيرجى كتابة الاسم الذي تريده بوضوح مع أمر التعديل، مثل:\n• **'غير الاسم إلى مكتب الهدى للمحاماة'**\n• **'تعديل العنوان إلى مكتب المحاماة والاستشارات'**"
+        : "Apologies! It seems the name is incomplete. Please type the correct name clearly with the edit command, for example:\n• **'change name to Al-Huda Law Firm'**\n• **'edit title to Law & Consultations Office'**";
+    }
 
     // 1. Rename website title
-    if (hasWord(isAR ? ['اسم', 'عنوان', 'تسمية'] : ['rename', 'name', 'title']) && 
-        (hasWord(isAR ? ['تغيير', 'تعديل', 'تسمية'] : ['change', 'rename', 'set']))) {
+    if (hasWord(['اسم', 'تسمية', 'تسميه']) && hasWord(['تغيير', 'تعديل', 'غير', 'بدل', 'سمى', 'تحديث', 'تسميه', 'تسمية'])) {
       let newName = '';
       if (isAR) {
         const matches = text.match(/(?:إلى|الى|هو)\s+(.+)$/i);
@@ -484,22 +506,23 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
 
       if (newName) {
         project.name = newName;
-        document.getElementById('editor-project-title').innerText = newName;
+        const titleEl = document.getElementById('editor-project-title');
+        if (titleEl) titleEl.innerText = newName;
         saveProjectState();
         return trans.copilotSuccessRename;
       }
     }
 
     // 2. Change Color Theme style
-    if (hasWord(isAR ? ['لون', 'الوان', 'الألوان', 'مظهر', 'ثيم'] : ['color', 'theme', 'palette', 'look'])) {
+    if (hasWord(['لون', 'الوان', 'مظهر', 'ثيم', 'شكل'])) {
       let newTheme = null;
-      if (hasWord(isAR ? ['بنفسجي', 'ميدنايت', 'الليل'] : ['violet', 'purple', 'midnight', 'dark'])) {
+      if (hasWord(['بنفسجي', 'ميدنايت', 'الليل', 'غامق', 'مظلم'])) {
         newTheme = 'theme-midnight';
-      } else if (hasWord(isAR ? ['أخضر', 'زمرد', 'طبيعي'] : ['green', 'emerald', 'natural'])) {
+      } else if (hasWord(['اخضر', 'زمرد', 'طبيعي', 'بيج'])) {
         newTheme = 'theme-emerald';
-      } else if (hasWord(isAR ? ['برتقالي', 'غروب', 'دافئ'] : ['orange', 'sunset', 'warm'])) {
+      } else if (hasWord(['برتقالي', 'غروب', 'دافئ', 'احمر'])) {
         newTheme = 'theme-sunset';
-      } else if (hasWord(isAR ? ['أزرق', 'رسمي', 'شركات'] : ['blue', 'navy', 'corporate', 'business'])) {
+      } else if (hasWord(['ازرق', 'رسمي', 'شركات', 'عملي'])) {
         newTheme = 'theme-corporate';
       }
 
@@ -512,11 +535,11 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
     }
 
     // 3. Change Font typography
-    if (hasWord(isAR ? ['خط', 'الخط', 'نوع الخط'] : ['font', 'typography'])) {
+    if (hasWord(['خط', 'الخط'])) {
       let newFont = null;
-      if (hasWord(isAR ? ['عربي', 'بلد', 'القاهرة', 'cairo'] : ['arabic', 'cairo'])) {
+      if (hasWord(['عربي', 'بلد', 'القاهرة', 'cairo'])) {
         newFont = 'font-arabic';
-      } else if (hasWord(isAR ? ['إنجليزي', 'لاتيني', 'outfit'] : ['english', 'outfit', 'latin'])) {
+      } else if (hasWord(['انجليزي', 'لاتيني', 'outfit'])) {
         newFont = 'font-english';
       }
 
@@ -529,17 +552,17 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
     }
 
     // 4. Delete section
-    if (hasWord(isAR ? ['احذف', 'حذف', 'إزالة', 'مسح'] : ['delete', 'remove', 'clear', 'wipe'])) {
+    if (hasWord(['احذف', 'حذف', 'ازالة', 'مسح'])) {
       let typeToDelete = null;
-      if (hasWord(isAR ? ['هيرو', 'بطل', 'واجهة', 'رئيسي'] : ['hero', 'header'])) {
+      if (hasWord(['هيرو', 'بطل', 'واجه', 'رئيسي'])) {
         typeToDelete = 'hero';
-      } else if (hasWord(isAR ? ['مميزات', 'خدمات', 'ميزات'] : ['features', 'services'])) {
+      } else if (hasWord(['مميزات', 'خدمات', 'ميزات'])) {
         typeToDelete = 'features';
-      } else if (hasWord(isAR ? ['معرض', 'صور', 'ألبوم'] : ['gallery', 'portfolio', 'images'])) {
+      } else if (hasWord(['معرض', 'صور', 'البوم'])) {
         typeToDelete = 'gallery';
-      } else if (hasWord(isAR ? ['اتصال', 'حجز', 'نموذج'] : ['contact', 'form', 'booking'])) {
+      } else if (hasWord(['اتصال', 'حجز', 'نموذج'])) {
         typeToDelete = 'contact';
-      } else if (hasWord(isAR ? ['تذييل', 'أخير', 'روابط'] : ['footer', 'bottom'])) {
+      } else if (hasWord(['تذييل', 'اخير', 'روابط'])) {
         typeToDelete = 'footer';
       }
 
@@ -555,17 +578,17 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
     }
 
     // 5. Add section
-    if (hasWord(isAR ? ['أضف', 'اضافة', 'إضافة', 'وضع', 'جديد'] : ['add', 'insert', 'create section', 'new section'])) {
+    if (hasWord(['اضف', 'اضافه', 'وضع', 'جديد'])) {
       let typeToAdd = null;
-      if (hasWord(isAR ? ['هيرو', 'بطل', 'واجهة', 'رئيسي'] : ['hero', 'header'])) {
+      if (hasWord(['هيرو', 'بطل', 'واجه', 'رئيسي'])) {
         typeToAdd = 'hero';
-      } else if (hasWord(isAR ? ['مميزات', 'خدمات', 'ميزات'] : ['features', 'services'])) {
+      } else if (hasWord(['مميزات', 'خدمات', 'ميزات'])) {
         typeToAdd = 'features';
-      } else if (hasWord(isAR ? ['معرض', 'صور', 'ألبوم'] : ['gallery', 'portfolio', 'images'])) {
+      } else if (hasWord(['معرض', 'صور', 'البوم'])) {
         typeToAdd = 'gallery';
-      } else if (hasWord(isAR ? ['اتصال', 'حجز', 'نموذج'] : ['contact', 'form', 'booking'])) {
+      } else if (hasWord(['اتصال', 'حجز', 'نموذج'])) {
         typeToAdd = 'contact';
-      } else if (hasWord(isAR ? ['تذييل', 'أخير', 'روابط'] : ['footer', 'bottom'])) {
+      } else if (hasWord(['تذييل', 'اخير', 'روابط'])) {
         typeToAdd = 'footer';
       }
 
@@ -576,7 +599,7 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
     }
 
     // 6. Edit Hero Title
-    if (hasWord(isAR ? ['عنوان الهيرو', 'عنوان البطل', 'عنوان الواجهة', 'العنوان الرئيسي'] : ['hero title', 'header title', 'main title'])) {
+    if (hasWord(['عنوان الهيرو', 'عنوان البطل', 'عنوان الواجه', 'العنوان الرئيسي', 'عنوان الموقع', 'عنوان']) && !hasWord(['فرعي'])) {
       let newTitle = '';
       if (isAR) {
         const matches = text.match(/(?:إلى|الى|هو)\s+(.+)$/i);
@@ -598,7 +621,7 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
     }
 
     // 7. Edit Hero Subtitle
-    if (hasWord(isAR ? ['عنوان فرعي', 'العنوان الفرعي', 'شرح البطل'] : ['hero subtitle', 'header subtitle', 'main subtitle'])) {
+    if (hasWord(['عنوان فرعي', 'العنوان الفرعي', 'شرح البطل', 'الوصف الفرعي', 'وصف فرعي'])) {
       let newSubtitle = '';
       if (isAR) {
         const matches = text.match(/(?:إلى|الى|هو)\s+(.+)$/i);
