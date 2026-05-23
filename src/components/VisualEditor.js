@@ -1066,20 +1066,24 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
       const host = localStorage.getItem('copilot_ollama_host') || 'http://localhost:11434';
       const model = localStorage.getItem('copilot_ollama_model') || 'llama3';
 
-      const res = await fetch(`${host}/api/chat`, {
+      const res = await fetch('/api/copilot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          provider: 'ollama',
+          host: host,
           model: model,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt }
-          ],
-          stream: false
+          ]
         })
       });
 
-      if (!res.ok) throw new Error(`Ollama returned status ${res.status}`);
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Ollama returned status ${res.status}`);
+      }
       const data = await res.json();
       const content = data.message?.content || data.response || '';
       return applyUpdatedProjectJSON(content);
@@ -1091,17 +1095,14 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
 
       const hfPrompt = `<|system|>\n${systemPrompt}\n<|user|>\n${userPrompt}\n<|assistant|>\n`;
 
-      const headers = { 'Content-Type': 'application/json' };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
-      const res = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
+      const res = await fetch('/api/copilot', {
         method: 'POST',
-        headers: headers,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          inputs: hfPrompt,
-          parameters: { max_new_tokens: 1500, return_full_text: false }
+          provider: 'huggingface',
+          model: model,
+          token: token,
+          hfPrompt: hfPrompt
         })
       });
 
