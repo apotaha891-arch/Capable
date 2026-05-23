@@ -2,6 +2,8 @@
 import { storage } from '../utils/storage.js';
 import { openDeploymentWizard } from './DeploymentWizard.js';
 
+const chatHistories = {};
+
 export function renderVisualEditor(appState, project, onBackToDashboard) {
   const trans = appState.translations;
   const isRTL = appState.lang === 'ar';
@@ -52,6 +54,7 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
             <button class="sidebar-tab-btn" data-tab="styles">${trans.editorTabStyles}</button>
             <button class="sidebar-tab-btn active" data-tab="sections">${trans.editorTabSections}</button>
             <button class="sidebar-tab-btn" data-tab="integrations">${trans.editorTabIntegrations}</button>
+            <button class="sidebar-tab-btn" data-tab="copilot">🤖 ${trans.editorTabCopilot}</button>
           </div>
           
           <div class="sidebar-content" id="sidebar-content-area">
@@ -368,7 +371,255 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
         saveProjectState();
         alert(trans.alertSiteSaved);
       });
+    } else if (activeEditorTab === 'copilot') {
+      renderCopilotTab(container);
     }
+  }
+
+  // --- AI Copilot Sidebar Tab Component ---
+  function renderCopilotTab(container) {
+    if (!chatHistories[project.id]) {
+      chatHistories[project.id] = [
+        { sender: 'assistant', text: trans.copilotGreeting }
+      ];
+    }
+    const history = chatHistories[project.id];
+
+    let messagesHtml = '';
+    history.forEach(msg => {
+      messagesHtml += `
+        <div class="copilot-bubble ${msg.sender}">
+          ${msg.text}
+        </div>
+      `;
+    });
+
+    container.innerHTML = `
+      <div class="copilot-chat-container">
+        <div class="copilot-messages" id="copilot-msg-stream">
+          ${messagesHtml}
+        </div>
+        
+        <div class="copilot-input-area">
+          <div id="copilot-typing-indicator" style="display: none; margin-bottom: 4px;">
+            <div class="copilot-typing">
+              <span class="spinner" style="width: 12px; height: 12px; border-width: 2px;"></span>
+              <span>${trans.copilotTyping}</span>
+            </div>
+          </div>
+          
+          <div class="copilot-input-row">
+            <textarea class="copilot-textarea" id="copilot-input-field" placeholder="${trans.copilotPlaceholder}"></textarea>
+            <button class="copilot-send-btn" id="copilot-send-btn">
+              ${trans.copilotSend}
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Scroll to bottom
+    const stream = document.getElementById('copilot-msg-stream');
+    if (stream) stream.scrollTop = stream.scrollHeight;
+
+    // Event handlers
+    const inputField = document.getElementById('copilot-input-field');
+    const sendBtn = document.getElementById('copilot-send-btn');
+
+    const handleSend = () => {
+      const promptText = inputField.value.trim();
+      if (!promptText) return;
+
+      inputField.value = '';
+
+      // Add user message
+      history.push({ sender: 'user', text: promptText });
+      renderCopilotTab(container);
+
+      // Show typing status
+      const typingIndicator = document.getElementById('copilot-typing-indicator');
+      if (typingIndicator) typingIndicator.style.display = 'block';
+
+      const stream = document.getElementById('copilot-msg-stream');
+      if (stream) stream.scrollTop = stream.scrollHeight;
+
+      setTimeout(() => {
+        const responseText = processCopilotCommand(promptText);
+        
+        if (typingIndicator) typingIndicator.style.display = 'none';
+
+        // Add assistant message
+        history.push({ sender: 'assistant', text: responseText });
+        renderCopilotTab(container);
+      }, 1000);
+    };
+
+    sendBtn.addEventListener('click', handleSend);
+    inputField.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSend();
+      }
+    });
+  }
+
+  // --- AI Copilot Natural Language Parser & Action Handler ---
+  function processCopilotCommand(text) {
+    const lowercase = text.toLowerCase().trim();
+    const isAR = appState.lang === 'ar';
+
+    const hasWord = (keywords) => keywords.some(k => lowercase.includes(k));
+
+    // 1. Rename website title
+    if (hasWord(isAR ? ['اسم', 'عنوان', 'تسمية'] : ['rename', 'name', 'title']) && 
+        (hasWord(isAR ? ['تغيير', 'تعديل', 'تسمية'] : ['change', 'rename', 'set']))) {
+      let newName = '';
+      if (isAR) {
+        const matches = text.match(/(?:إلى|الى|هو)\s+(.+)$/i);
+        if (matches) newName = matches[1].trim();
+      } else {
+        const matches = text.match(/(?:to|is)\s+(.+)$/i);
+        if (matches) newName = matches[1].trim();
+      }
+
+      if (newName) {
+        project.name = newName;
+        document.getElementById('editor-project-title').innerText = newName;
+        saveProjectState();
+        return trans.copilotSuccessRename;
+      }
+    }
+
+    // 2. Change Color Theme style
+    if (hasWord(isAR ? ['لون', 'الوان', 'الألوان', 'مظهر', 'ثيم'] : ['color', 'theme', 'palette', 'look'])) {
+      let newTheme = null;
+      if (hasWord(isAR ? ['بنفسجي', 'ميدنايت', 'الليل'] : ['violet', 'purple', 'midnight', 'dark'])) {
+        newTheme = 'theme-midnight';
+      } else if (hasWord(isAR ? ['أخضر', 'زمرد', 'طبيعي'] : ['green', 'emerald', 'natural'])) {
+        newTheme = 'theme-emerald';
+      } else if (hasWord(isAR ? ['برتقالي', 'غروب', 'دافئ'] : ['orange', 'sunset', 'warm'])) {
+        newTheme = 'theme-sunset';
+      } else if (hasWord(isAR ? ['أزرق', 'رسمي', 'شركات'] : ['blue', 'navy', 'corporate', 'business'])) {
+        newTheme = 'theme-corporate';
+      }
+
+      if (newTheme) {
+        project.theme = newTheme;
+        saveProjectState();
+        renderCanvasPreview();
+        return trans.copilotSuccessTheme;
+      }
+    }
+
+    // 3. Change Font typography
+    if (hasWord(isAR ? ['خط', 'الخط', 'نوع الخط'] : ['font', 'typography'])) {
+      let newFont = null;
+      if (hasWord(isAR ? ['عربي', 'بلد', 'القاهرة', 'cairo'] : ['arabic', 'cairo'])) {
+        newFont = 'font-arabic';
+      } else if (hasWord(isAR ? ['إنجليزي', 'لاتيني', 'outfit'] : ['english', 'outfit', 'latin'])) {
+        newFont = 'font-english';
+      }
+
+      if (newFont) {
+        project.font = newFont;
+        saveProjectState();
+        renderCanvasPreview();
+        return trans.copilotSuccessFont;
+      }
+    }
+
+    // 4. Delete section
+    if (hasWord(isAR ? ['احذف', 'حذف', 'إزالة', 'مسح'] : ['delete', 'remove', 'clear', 'wipe'])) {
+      let typeToDelete = null;
+      if (hasWord(isAR ? ['هيرو', 'بطل', 'واجهة', 'رئيسي'] : ['hero', 'header'])) {
+        typeToDelete = 'hero';
+      } else if (hasWord(isAR ? ['مميزات', 'خدمات', 'ميزات'] : ['features', 'services'])) {
+        typeToDelete = 'features';
+      } else if (hasWord(isAR ? ['معرض', 'صور', 'ألبوم'] : ['gallery', 'portfolio', 'images'])) {
+        typeToDelete = 'gallery';
+      } else if (hasWord(isAR ? ['اتصال', 'حجز', 'نموذج'] : ['contact', 'form', 'booking'])) {
+        typeToDelete = 'contact';
+      } else if (hasWord(isAR ? ['تذييل', 'أخير', 'روابط'] : ['footer', 'bottom'])) {
+        typeToDelete = 'footer';
+      }
+
+      if (typeToDelete) {
+        const idx = project.sections.findIndex(s => s.type === typeToDelete);
+        if (idx !== -1) {
+          project.sections.splice(idx, 1);
+          saveProjectState();
+          renderCanvasPreview();
+          return trans.copilotSuccessSectionDel;
+        }
+      }
+    }
+
+    // 5. Add section
+    if (hasWord(isAR ? ['أضف', 'اضافة', 'إضافة', 'وضع', 'جديد'] : ['add', 'insert', 'create section', 'new section'])) {
+      let typeToAdd = null;
+      if (hasWord(isAR ? ['هيرو', 'بطل', 'واجهة', 'رئيسي'] : ['hero', 'header'])) {
+        typeToAdd = 'hero';
+      } else if (hasWord(isAR ? ['مميزات', 'خدمات', 'ميزات'] : ['features', 'services'])) {
+        typeToAdd = 'features';
+      } else if (hasWord(isAR ? ['معرض', 'صور', 'ألبوم'] : ['gallery', 'portfolio', 'images'])) {
+        typeToAdd = 'gallery';
+      } else if (hasWord(isAR ? ['اتصال', 'حجز', 'نموذج'] : ['contact', 'form', 'booking'])) {
+        typeToAdd = 'contact';
+      } else if (hasWord(isAR ? ['تذييل', 'أخير', 'روابط'] : ['footer', 'bottom'])) {
+        typeToAdd = 'footer';
+      }
+
+      if (typeToAdd) {
+        addSectionTemplate(typeToAdd);
+        return trans.copilotSuccessSectionAdd;
+      }
+    }
+
+    // 6. Edit Hero Title
+    if (hasWord(isAR ? ['عنوان الهيرو', 'عنوان البطل', 'عنوان الواجهة', 'العنوان الرئيسي'] : ['hero title', 'header title', 'main title'])) {
+      let newTitle = '';
+      if (isAR) {
+        const matches = text.match(/(?:إلى|الى|هو)\s+(.+)$/i);
+        if (matches) newTitle = matches[1].trim();
+      } else {
+        const matches = text.match(/(?:to|is)\s+(.+)$/i);
+        if (matches) newTitle = matches[1].trim();
+      }
+
+      if (newTitle) {
+        const heroSec = project.sections.find(s => s.type === 'hero');
+        if (heroSec) {
+          heroSec.content.title = newTitle;
+          saveProjectState();
+          renderCanvasPreview();
+          return trans.copilotSuccessHeroEdit;
+        }
+      }
+    }
+
+    // 7. Edit Hero Subtitle
+    if (hasWord(isAR ? ['عنوان فرعي', 'العنوان الفرعي', 'شرح البطل'] : ['hero subtitle', 'header subtitle', 'main subtitle'])) {
+      let newSubtitle = '';
+      if (isAR) {
+        const matches = text.match(/(?:إلى|الى|هو)\s+(.+)$/i);
+        if (matches) newSubtitle = matches[1].trim();
+      } else {
+        const matches = text.match(/(?:to|is)\s+(.+)$/i);
+        if (matches) newSubtitle = matches[1].trim();
+      }
+
+      if (newSubtitle) {
+        const heroSec = project.sections.find(s => s.type === 'hero');
+        if (heroSec) {
+          heroSec.content.subtitle = newSubtitle;
+          saveProjectState();
+          renderCanvasPreview();
+          return trans.copilotSuccessHeroEdit;
+        }
+      }
+    }
+
+    return trans.copilotUnknown;
   }
 
   // Add Default Section Item Schema

@@ -154,5 +154,19 @@ export default {
 
   // Notification alerts
   alertSiteSaved: "Changes saved successfully!",
-  alertClonedSuccess: "Project cloned successfully to your dashboard and ready to edit!"
+  alertClonedSuccess: "Project cloned successfully to your dashboard and ready to edit!",
+
+  // AI Copilot
+  editorTabCopilot: "AI Copilot",
+  copilotGreeting: "Hello! I am your AI editing assistant. You can write requests to fully modify your site, like:\n• 'change colors to violet'\n• 'add gallery section'\n• 'change hero title to Elite Law Firm'\n• 'delete footer section'\nHow can I help you today?",
+  copilotPlaceholder: "Type edit command here...",
+  copilotSend: "Send command ✨",
+  copilotTyping: "Analyzing your request and applying magical updates...",
+  copilotSuccessTheme: "✅ Website theme color updated successfully!",
+  copilotSuccessFont: "✅ Website typography updated successfully!",
+  copilotSuccessRename: "✅ Website name changed successfully!",
+  copilotSuccessSectionAdd: "✅ Section added successfully to your website!",
+  copilotSuccessSectionDel: "✅ Section removed successfully!",
+  copilotSuccessHeroEdit: "✅ Hero texts updated successfully!",
+  copilotUnknown: "🤔 I couldn't understand that request. Try saying something like 'change theme to sunset' or 'add contact section'."
 };
