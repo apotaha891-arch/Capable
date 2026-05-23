@@ -413,6 +413,7 @@ function showSuccessScreen(appState, project, onDeploymentSuccess) {
   const visitBtn = document.getElementById('final-visit-btn');
   visitBtn.addEventListener('click', () => {
     document.getElementById('deployment-wizard-modal').remove();
+    window.open(`${window.location.origin}${window.location.pathname}#site/${project.id}`, '_blank');
     onDeploymentSuccess(project);
   });
 

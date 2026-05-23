@@ -13,6 +13,7 @@ export default {
   create: "Create",
   deploy: "Deploy",
   preview: "Preview",
+  previewNewWindow: "Preview ↗️",
   back: "Back",
   status: "Status",
   public: "Public",

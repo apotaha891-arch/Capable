@@ -13,6 +13,7 @@ export default {
   create: "إنشاء",
   deploy: "نشر الموقع",
   preview: "معاينة",
+  previewNewWindow: "معاينة ↗️",
   back: "رجوع",
   status: "الحالة",
   public: "عام",

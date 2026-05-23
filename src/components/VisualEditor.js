@@ -33,6 +33,10 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
             <button class="device-btn" data-device="mobile" title="Mobile View">🤳</button>
           </div>
           
+          <button class="btn btn-secondary btn-sm" id="editor-preview-btn">
+            ${trans.previewNewWindow}
+          </button>
+          
           <button class="btn btn-accent btn-sm" id="editor-deploy-btn">
             🚀 ${trans.deploy}
           </button>
@@ -98,6 +102,11 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
     // Bind Back Button
     document.getElementById('editor-back-btn').addEventListener('click', () => {
       onBackToDashboard();
+    });
+
+    // Bind Preview Button
+    document.getElementById('editor-preview-btn').addEventListener('click', () => {
+      window.open(`${window.location.origin}${window.location.pathname}#site/${project.id}`, '_blank');
     });
 
     // Bind Device Simulator Buttons
