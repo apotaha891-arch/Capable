@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>رونق | منصة بيع وشراء الفساتين المستعملة والجديدة</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts (Cairo) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        cairo: ['Cairo', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#fff1f2',
+                            100: '#ffe4e6',
+                            200: '#fecdd3',
+                            300: '#fda4af',
+                            400: '#fb7185',
+                            500: '#f43f5e', // Primary Rose Gold/Pink accent
+                            600: '#e11d48',
+                            700: '#be123c',
+                            800: '#9f1239',
+                            900: '#881337',
+                        },
+                        darkGold: '#C5A880',
+                        lightGold: '#E5D5C0',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Cairo', sans-serif;
+            scroll-behavior: smooth;
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #fda4af;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #f43f5e;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 overflow-x-hidden">
+
+    <!-- Top Notification Bar -->
+    <div class="bg-gradient-to-l from-brand-600 to-rose-500 text-white text-xs md:text-sm py-2 px-4 text-center font-medium">
+        <span>✨ اعرضي فستانكِ اليوم مجاناً! لا ندفع إلا عند البيع - عمولتنا 15% فقط ✨</span>
+    </div>
+
+    <!-- Header / Navbar -->
+    <header class="sticky top-0 z-50 bg-white/95 backdrop-blur-md shadow-sm border-b border-rose-100">
+        <div class="container mx-auto px-4 py-4 flex items-center justify-between">
+            <!-- Logo -->
+            <a href="#" class="flex items-center gap-2">
+                <span class="text-2xl md:text-3xl font-extrabold tracking-wider text-brand-600 font-serif">رونــق</span>
+                <span class="text-xs bg-brand-100 text-brand-700 px-2 py-0.5 rounded-full font-bold">بوتيك</span>
+            </a>
+
+            <!-- Desktop Nav Links -->
+            <nav class="hidden lg:flex items-center gap-8 font-semibold text-slate-600">
+                <a href="#" class="hover:text-brand-500 transition-colors">الرئيسية</a>
+                <a href="#explore" class="hover:text-brand-500 transition-colors">تصفح الفساتين</a>
+                <a href="#how-it-works" class="hover:text-brand-500 transition-colors">كيف يعمل الموقع؟</a>
+                <a href="#calculator" class="hover:text-brand-500 transition-colors">حاسبة الأرباح</a>
+                <a href="#faq" class="hover:text-brand-500 transition-colors">الأسئلة الشائعة</a>
+            </nav>
+
+            <!-- Actions -->
+            <div class="flex items-center gap-3">
+                <button onclick="openModal('listDressModal')" class="bg-brand-600 hover:bg-brand-700 text-white font-bold px-4 py-2.5 rounded-full text-sm shadow-lg shadow-brand-200 transition-all transform hover:-translate-y-0.5 flex items-center gap-2">
+                    <i class="fa-solid fa-plus"></i>
+                    <span>اعرضي فستانك مجاناً</span>
+                </button>
+                
+                <!-- Mobile Menu Button -->
+                <button onclick="toggleMobileMenu()" class="lg:hidden text-slate-600 hover:text-brand-600 p-2 focus:outline-none">
+                    <i id="menu-icon" class="fa-solid fa-bars text-2xl"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Mobile Menu -->
+        <div id="mobile-menu" class="hidden lg:hidden bg-white border-t border-slate-100 px-4 py-6 space-y-4 shadow-inner">
+            <a href="#" onclick="toggleMobileMenu()" class="block font-semibold text-slate-700 hover:text-brand-500 py-2 border-b border-slate-50">الرئيسية</a>
+            <a href="#explore" onclick="toggleMobileMenu()" class="block font-semibold text-slate-700 hover:text-brand-500 py-2 border-b border-slate-50">تصفح الفساتين</a>
+            <a href="#how-it-works" onclick="toggleMobileMenu()" class="block font-semibold text-slate-700 hover:text-brand-500 py-2 border-b border-slate-50">كيف يعمل الموقع؟</a>
+            <a href="#calculator" onclick="toggleMobileMenu()" class="block font-semibold text-slate-700 hover:text-brand-500 py-2 border-b border-slate-50">حاسبة الأرباح</a>
+            <a href="#faq" onclick="toggleMobileMenu()" class="block font-semibold text-slate-700 hover:text-brand-500 py-2">الأسئلة الشائعة</a>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="relative bg-gradient-to-b from-brand-50 via-white to-transparent py-16 md:py-24 overflow-hidden">
+        <div class="container mx-auto px-4 grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+            
+            <!-- Hero Text -->
+            <div class="lg:col-span-7 text-center lg:text-right space-y-6 z-10">
+                <div class="inline-flex items-center gap-2 bg-rose-100/60 text-brand-700 px-4 py-1.5 rounded-full text-sm font-semibold">
+                    <span class="w-2 h-2 rounded-full bg-brand-500 animate-ping"></span>
+                    <span>مساحتكِ الخاصة لبيع وشراء الفساتين بكل ثقة</span>
+                </div>
+                <h1 class="text-4xl md:text-5xl lg:text-6xl font-extrabold text-slate-900 leading-tight">
+                    أعيدي الحياة لفساتينكِ، <br>
+                    <span class="text-brand-600 bg-clip-text">أو تألقي بإطلالة جديدة</span> بأقل التكاليف!
+                </h1>
+                <p class="text-base md:text-lg text-slate-600 max-w-2xl mx-auto lg:mx-0 leading-relaxed">
+                    هل لديكِ فستان زفاف أو سهرة ارتديتيه مرة واحدة وترغبين في بيعه؟ أو تبحثين عن إطلالة ساحرة لحدث قريب بسعر مناسب؟ رونق يجمعكِ بآلاف السيدات لعرض وطلب الفساتين (الجديدة والمستعملة).
+                </p>
+                
+                <!-- Highlights -->
+                <div class="grid grid-cols-3 gap-4 max-w-md mx-auto lg:mx-0 py-4 text-center">
+                    <div class="bg-white p-3 rounded-xl shadow-sm border border-rose-50">
+                        <span class="block text-2xl font-bold text-brand-600">0%</span>
+                        <span class="text-xs text-slate-500">رسوم عرض</span>
+                    </div>
+                    <div class="bg-white p-3 rounded-xl shadow-sm border border-rose-50">
+                        <span class="block text-2xl font-bold text-brand-600">15%</span>
+                        <span class="text-xs text-slate-500">عمولة بيع فقط</span>
+                    </div>
+                    <div class="bg-white p-3 rounded-xl shadow-sm border border-rose-50">
+                        <span class="block text-2xl font-bold text-brand-600">+10k</span>
+                        <span class="text-xs text-slate-500">مستخدمة نشطة</span>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-4">
+                    <button onclick="openModal('listDressModal')" class="w-full sm:w-auto bg-brand-600 hover:bg-brand-700 text-white font-bold px-8 py-4 rounded-full shadow-lg shadow-brand-200 transition-all transform hover:-translate-y-1 text-center">
+                        <i class="fa-solid fa-camera ml-2"></i> اعرضي فستانك الآن مجاناً
+                    </button>
+                    <a href="#explore" class="w-full sm:w-auto bg-white hover:bg-slate-50 text-slate-700 font-bold px-8 py-4 rounded-full border border-slate-200 shadow-sm transition-all transform hover:-translate-y-1 text-center">
+                        <i class="fa-solid fa-magnifying-glass ml-2"></i> تصفحي الفساتين المعروضة
+                    </a>
+                </div>
+            </div>
+
+            <!-- Hero Image / Visual Collage -->
+            <div class="lg:col-span-5 relative flex justify-center">
+                <div class="relative w-72 h-96 md:w-80 md:h-[450px] rounded-[2rem] overflow-hidden shadow-2xl border-4 border-white transform -rotate-3 hover:rotate-0 transition-transform duration-500 z-10">
+                    <img src="https://images.unsplash.com/photo-1566174053879-31528523f8ae?auto=format&fit=crop&w=600&q=80" alt="Beautiful Dress" class="w-full h-full object-cover">
+                    <div class="absolute bottom-4 right-4 bg-white/90 backdrop-blur-sm p-3 rounded-xl text-right">
+                        <p class="text-xs text-slate-500">فستان سهرة روز غولد</p>
+                        <p class="text-sm font-bold text-brand-600">750 ر.س <span class="text-xs text-slate-400 line-through">2400 ر.س</span></p>
+                    </div>
+                </div>
+                
+                <!-- Supporting Decorative Elements -->
+                <div class="absolute -top-6 -right-6 w-32 h-32 bg-brand-200 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-blob"></div>
+                <div class="absolute -bottom-10 -left-6 w-36 h-36 bg-pink-300 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-blob animation-delay-2000"></div>
+                
+                <div class="absolute top-1/2 -translate-y-1/2 -left-12 hidden md:block w-48 h-64 rounded-2.5xl overflow-hidden shadow-xl border-4 border-white transform rotate-6 z-0">
+                    <img src="https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&w=400&q=80" alt="Elegant Dress" class="w-full h-full object-cover">
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- Value Proposition / Banner -->
+    <section class="bg-slate-900 text-white py-10 my-8">
+        <div class="container mx-auto px-4 grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
+            <div class="flex flex-col items-center p-4">
+                <div class="w-12 h-12 rounded-full bg-brand-500/20 text-brand-400 flex items-center justify-center text-xl mb-3">
+                    <i class="fa-solid fa-sack-dollar"></i>
+                </div>
+                <h3 class="font-bold text-lg mb-1">عرض مجاني 100%</h3>
+                <p class="text-sm text-slate-400">لن تدفعي أي ريال لعرض فستانكِ على المنصة، العرض مجاني بالكامل.</p>
+            </div>
+            <div class="flex flex-col items-center p-4 border-y md:border-y-0 md:border-x border-slate-800">
+                <div class="w-12 h-12 rounded-full bg-brand-500/20 text-brand-400 flex items-center justify-center text-xl mb-3">
+                    <i class="fa-solid fa-percent"></i>
+                </div>
+                <h3 class="font-bold text-lg mb-1">عمولة عند البيع فقط</h3>
+                <p class="text-sm text-slate-400">نقتطع عمولة بسيطة تبلغ 15% فقط بعد إتمام عملية البيع واستلام المشتري للفستان.</p>
+            </div>
+            <div class="flex flex-col items-center p-4">
+                <div class="w-12 h-12 rounded-full bg-brand-500/20 text-brand-400 flex items-center justify-center text-xl mb-3">
+                    <i class="fa-solid fa-shield-halved"></i>
+                </div>
+                <h3 class="font-bold text-lg mb-1">ضمان وحماية كاملة</h3>
+                <p class="text-sm text-slate-400">نضمن حقوق البائعة والمشترية من خلال بوابات دفع آمنة وسياسة فحص مرنة.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works Section -->
+    <section id="how-it-works" class="py-16 bg-white">
+        <div class="container mx-auto px-4">
+            <div class="text-center max-w-2xl mx-auto mb-12">
+                <h2 class="text-3xl font-bold text-slate-900 mb-4">كيف تعمل منصة رونق؟</h2>
+                <p class="text-slate-600">خطوات بسيطة تضمن لكِ بيع فستانكِ القديم أو شراء فستان أحلامكِ بكل أمان وسهولة</p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+                
+                <!-- For Sellers -->
+                <div class="bg-brand-50/50 p-8 rounded-3xl border border-brand-100/50">
+                    <span class="bg-brand-100 text-brand-700 px-3 py-1 rounded-full text-xs font-bold mb-4 inline-block">للبائعات</span>
+                    <h3 class="text-2xl font-bold text-slate-900 mb-6">كيف تبيعين فستانكِ؟</h3>
+                    
+                    <div class="space-y-6">
+                        <div class="flex gap-4">
+                            <div class="w-10 h-10 rounded-full bg-brand-600 text-white flex items-center justify-center font-bold shrink-0">١</div>
+                            <div>
+                                <h4 class="font-bold text-slate-800">صوري واعرضي مجاناً</h4>
+                                <p class="text-sm text-slate-600 mt-1">التقطي صوراً واضحة للفستان في إضاءة جيدة، ثم املئي تفاصيل المقاس، الماركة، والحالة.</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="w-10 h-10 rounded-full bg-brand-600 text-white flex items-center justify-center font-bold shrink-0">٢</div>
+                            <div>
+                                <h4 class="font-bold text-slate-800">حددي السعر المناسب</h4>
+                                <p class="text-sm text-slate-600 mt-1">ضعي السعر الذي ترغبين به، وسنساعدكِ باقتراح السعر المناسب بناءً على حالة الفستان وسعره الأصلي.</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="w-10 h-10 rounded-full bg-brand-600 text-white flex items-center justify-center font-bold shrink-0">٣</div>
+                            <div>
+                                <h4 class="font-bold text-slate-800">اشحني واحصلي على المال</h4>
+                                <p class="text-sm text-slate-600 mt-1">عند الشراء، سنرسل لكِ بوليصة الشحن. بمجرد استلام المشترية للفستان وتأكيده، نرسل لكِ أموالكِ مخصوماً منها عمولتنا (15%).</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- For Buyers -->
+                <div class="bg-rose-50/30 p-8 rounded-3xl border border-rose-100/50">
+                    <span class="bg-rose-100 text-rose-700 px-3 py-1 rounded-full text-xs font-bold mb-4 inline-block">للمشتريات</span>
+                    <h3 class="text-2xl font-bold text-slate-900 mb-6">كيف تشترين فستاناً؟</h3>
+                    
+                    <div class="space-y-6">
+                        <div class="flex gap-4">
+                            <div class="w-10 h-10 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold shrink-0">١</div>
+                            <div>
+                                <h4 class="font-bold text-slate-800">تصفحي واختاري</h4>
+                                <p class="text-sm text-slate-600 mt-1">ابحثي بين آلاف الفساتين المميزة والفريدة، واستخدمي الفلاتر لتحديد المقاس واللون والسعر المناسب لكِ.</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="w-10 h-10 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold shrink-0">٢</div>
+                            <div>
+                                <h4 class="font-bold text-slate-800">ادفعي بأمان</h4>
+                                <p class="text-sm text-slate-600 mt-1">نوفر طرق دفع آمنة (مدى، فيزا، أبل باي). نحتفظ بالمبلغ بأمان ولا نسلمه للبائعة حتى تستلمي الفستان وتتأكدي منه.</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-4">
+                            <div class="w-10 h-10 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold shrink-0">٣</div>
+                            <div>
+                                <h4 class="font-bold text-slate-800">تألقي بإطلالتكِ</h4>
+                                <p class="text-sm text-slate-600 mt-1">يصلكِ الفستان مغسولاً ومعقماً ومطابقاً للمواصفات تماماً لتظهري بأجمل حُلّة في مناسبتكِ القادمة.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- Interactive Commission Calculator -->
+    <section id="calculator" class="py-16 bg-slate-50 border-y border-slate-100">
+        <div class="container mx-auto px-4 max-w-4xl">
+            <div class="bg-white rounded-3xl p-8 md:p-12 shadow-xl border border-brand-100 grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
+                
+                <div class="md:col-span-6 space-y-4">
+                    <span class="text-brand-600 font-bold text-sm block">حاسبة الأرباح الذكية</span>
+                    <h2 class="text-3xl font-bold text-slate-900">احسبي أرباحكِ قبل العرض!</h2>
+                    <p class="text-slate-600 text-sm leading-relaxed">
+                        شفافيتنا هي سر ثقتنا. أدخلي السعر الذي ترغبين في بيع فستانكِ به، وسنقوم بحساب عمولتنا والمبلغ الصافي الذي سيصل مباشرة إلى حسابكِ البنكي فور البيع.
+                    </p>
+                    <div class="pt-2 text-xs text-slate-400">
+                        * عمولة رونق الثابتة هي 15% فقط وتغطي تكاليف تشغيل المنصة والتسويق لفستانكِ.
+                    </div>
+                </div>
+
+                <div class="md:col-span-6 bg-brand-50/50 p-6 rounded-2xl border border-brand-100 space-y-6">
+                    <div>
+                        <label for="dress-price" class="block text-sm font-bold text-slate-700 mb-2">سعر بيع الفستان المقترح (ر.س)</label>
+                        <div class="relative">
+                            <input type="number" id="dress-price" value="1000" oninput="calculateCommission()" class="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 pr-12 text-lg font-bold text-slate-800 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-all">
+                            <span class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">ر.س</span>
+                        </div>
+                    </div>
+
+                    <div class="space-y-3 pt-4 border-t border-dashed border-brand-200">
+                        <div class="flex justify-between text-sm text-slate-600">
+                            <span>عمولة منصة رونق (15%):</span>
+                            <span id="commission-amount" class="font-bold text-brand-600">-150 ر.س</span>
+                        </div>
+                        <div class="flex justify-between text-sm text-slate-600">
+                            <span>رسوم عرض وإدراج الفستان:</span>
+                            <span class="font-bold text-emerald-600">مجاناً (0 ر.س)</span>
+                        </div>
+                        <div class="flex justify-between items-center pt-3 border-t border-slate-200">
+                            <span class="font-bold text-slate-900">صافي أرباحكِ المتوقعة:</span>
+                            <span id="payout-amount" class="text-2xl font-extrabold text-slate-950">850 ر.س</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- Explore / Catalog Section -->
+    <section id="explore" class="py-16 bg-white">
+        <div class="container mx-auto px-4">
+            
+            <!-- Section Header & Filters -->
+            <div class="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
+                <div>
+                    <h2 class="text-3xl font-bold text-slate-900 mb-2">الفساتين المعروضة حديثاً</h2>
+                    <p class="text-slate-600 text-sm">فساتين راقية بأسعار لا تقبل المنافسة، مراجعة ومضمونة من رونق</p>
+                </div>
+                
+                <!-- Category Filters (JS Controlled) -->
+                <div class="flex flex-wrap gap-2">
+                    <button onclick="filterCategory('all')" id="btn-all" class="filter-btn active-filter px-4 py-2 rounded-full text-sm font-semibold border transition-all bg-brand-600 border-brand-600 text-white">الكل</button>
+                    <button onclick="filterCategory('wedding')" id="btn-wedding" class="filter-btn px-4 py-2 rounded-full text-sm font-semibold border transition-all bg-white border-slate-200 text-slate-600 hover:border-brand-500 hover:text-brand-600">فساتين زفاف</button>
+                    <button onclick="filterCategory('soiree')" id="btn-soiree" class="filter-btn px-4 py-2 rounded-full text-sm font-semibold border transition-all bg-white border-slate-200 text-slate-600 hover:border-brand-500 hover:text-brand-600">فساتين سهرة</button>
+                    <button onclick="filterCategory('casual')" id="btn-casual" class="filter-btn px-4 py-2 rounded-full text-sm font-semibold border transition-all bg-white border-slate-200 text-slate-600 hover:border-brand-500 hover:text-brand-600">ناعم / كاجوال</button>
+                </div>
+            </div>
+
+            <!-- Dresses Grid -->
+            <div id="dresses-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                <!-- Card 1 -->
+                <div class="dress-card bg-white rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col group" data-category="soiree">
+                    <div class="relative aspect-[3/4] overflow-hidden bg-slate-100">
+                        <span class="absolute top-3 right-3 bg-brand-100 text-brand-700 text-xs font-bold px-2.5 py-1 rounded-full z-10">مستعمل كالمستجد</span>
+                        <img src="https://images.unsplash.com/photo-1595777457583-95e059d581b8?auto=format&fit=crop&w=500&q=80" alt="فستان سهرة" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
+                        <button onclick="toggleWishlist(this)" class="absolute top-3 left-3 w-8 h-8 rounded-full bg-white/80 backdrop-blur-sm text-slate-400 hover:text-brand-500 flex items-center justify-center transition-colors">
+                            <i class="fa-solid fa-heart"></i>
+                        </button>
+                    </div>
+                    <div class="p-4 flex-grow flex flex-col justify-between">
+                        <div>
+                            <div class="flex justify-between items-center text-xs text-slate-400 mb-1">
+                                <span>المقاس: M (38)</span>
+                                <span>الماركة: زارا</span>
+                            </div>
+                            <h3 class="font-bold text-slate-800 text-sm

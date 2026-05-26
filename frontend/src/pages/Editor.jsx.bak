@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
-import { Sparkles, Send, Code2, Eye, Loader, Save, AlertCircle, CheckCircle, Clock, ChevronDown, ChevronUp, Zap, Settings, X, Plus, FileCode, FileType2, FileJson, Camera } from 'lucide-react';
-import html2canvas from 'html2canvas';
+import { Sparkles, Send, Code2, Eye, Loader, Save, AlertCircle, CheckCircle, Clock, ChevronDown, ChevronUp, Zap, Settings, X } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -24,12 +23,7 @@ const NEW_PROJECT_CODE = `<!DOCTYPE html>
 
 export default function Editor() {
   const [prompt, setPrompt] = useState('');
-  
-  // Multi-file state
-  const [files, setFiles] = useState([]);
-  const [activeFileId, setActiveFileId] = useState(null);
-  const [activeHtmlFile, setActiveHtmlFile] = useState('index.html');
-  
+  const [code, setCode] = useState(NEW_PROJECT_CODE);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
@@ -37,156 +31,38 @@ export default function Editor() {
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(true);
   const [iframeKey, setIframeKey] = useState(0);
-  
   const [projectName, setProjectName] = useState('');
   const [description, setDescription] = useState('');
   const [thumbnailUrl, setThumbnailUrl] = useState('');
   const [price, setPrice] = useState(0);
   const [editingName, setEditingName] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  
-  const [tokenInfo, setTokenInfo] = useState(null); 
+  const [tokenInfo, setTokenInfo] = useState(null); // { tokens_used, tokens_limit }
   const { t } = useLang();
   const { authFetch } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
   const nameRef = useRef(null);
-  const iframeRef = useRef(null);
 
   /* ── load project ─────────────────────────────── */
   useEffect(() => {
-    if (!id) { navigate('/dashboard'); return; }
-    
-    let loadedProject = null;
+    if (!id) { setCode(NEW_PROJECT_CODE); return; }
     authFetch(`/api/projects/${id}`)
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(p => { 
-        loadedProject = p;
+        setCode(p.code || NEW_PROJECT_CODE); 
         setProjectName(p.name || t('untitled')); 
         setDescription(p.description || '');
         setThumbnailUrl(p.thumbnail_url || '');
         setPrice(p.price || 0);
-        return authFetch(`/api/projects/${id}/files`);
       })
-      .then(r => r.ok ? r.json() : [])
-      .then(f => {
-        if (f.length === 0) {
-          // Fallback to single code if no files exist
-          const fallbackFile = { id: 'fallback', filename: 'index.html', content: loadedProject.code || NEW_PROJECT_CODE, file_type: 'html' };
-          setFiles([fallbackFile]);
-          setActiveFileId('fallback');
-        } else {
-          setFiles(f);
-          setActiveFileId(f[0].id);
-        }
-      })
-      .catch(() => navigate('/dashboard'));
+      .catch(() => navigate('/editor'));
   }, [id, navigate, t]);
 
   /* ── auto-clear notifications ─────────────────── */
   useEffect(() => { if (success) { const timer = setTimeout(() => setSuccess(''), 3000); return () => clearTimeout(timer); } }, [success]);
   useEffect(() => { if (!projectName) setProjectName(t('untitled')); }, [t]);
   useEffect(() => { if (error)   { const timer2 = setTimeout(() => setError(''),  6000); return () => clearTimeout(timer2); } }, [error]);
-
-  /* ── handle iframe navigation ─────────────────── */
-  useEffect(() => {
-    const handleMessage = (e) => {
-      if (e.data?.type === 'NAVIGATE') {
-        let target = e.data.href;
-        if (target.startsWith('/')) target = target.substring(1);
-        if (!target.endsWith('.html')) target += '.html';
-        
-        // check if file exists
-        const exists = files.some(f => f.filename === target);
-        if (exists) {
-          setActiveHtmlFile(target);
-          setActiveTab('preview');
-        } else {
-          alert(`File ${target} not found in this project!`);
-        }
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [files]);
-
-  /* ── Compilation ─────────────────────────────── */
-  const getCompiledCode = () => {
-    let htmlFile = files.find(f => f.filename === activeHtmlFile);
-    if (!htmlFile) htmlFile = files.find(f => f.filename.endsWith('.html'));
-    let htmlContent = htmlFile ? htmlFile.content : '<!DOCTYPE html><html><body></body></html>';
-    
-    let styleContent = '';
-    let scriptContent = '';
-    
-    files.forEach(f => {
-      if (f.filename.endsWith('.css')) styleContent += `n${f.content}`;
-      if (f.filename.endsWith('.js')) scriptContent += `n${f.content}`;
-    });
-    
-    if (styleContent) {
-      if (htmlContent.includes('</head>')) {
-        htmlContent = htmlContent.replace('</head>', `<style>${styleContent}</style></head>`);
-      } else {
-        htmlContent += `<style>${styleContent}</style>`;
-      }
-    }
-    
-    if (scriptContent) {
-      if (htmlContent.includes('</body>')) {
-        htmlContent = htmlContent.replace('</body>', `<script>${scriptContent}</script></body>`);
-      } else {
-        htmlContent += `<script>${scriptContent}</script>`;
-      }
-    }
-    
-    return htmlContent;
-  };
-
-  const compiledSrcDoc = getCompiledCode() + 
-    `<script>
-      // Intercept all link clicks to handle internal routing
-      document.addEventListener('click', function(e) {
-        var a = e.target.closest('a');
-        if (a) {
-          var href = a.getAttribute('href');
-          if (href && href.startsWith('#')) return; // allow anchor smooth scrolling
-          e.preventDefault();
-          if (href && !href.startsWith('http') && !href.startsWith('javascript:')) {
-            window.parent.postMessage({ type: 'NAVIGATE', href: href }, '*');
-          } else if (href) {
-            alert('External navigation is disabled in preview mode.');
-          }
-        }
-      });
-      // Intercept form submissions
-      document.addEventListener('submit', function(e) {
-        e.preventDefault();
-        alert('Form submission is disabled in preview mode.');
-      });
-    </script>`;
-
-  /* ── auto capture thumbnail ───────────────────── */
-  const captureThumbnail = async (projectId) => {
-    try {
-      const iframe = iframeRef.current;
-      if (!iframe || !iframe.contentDocument) return;
-      const canvas = await html2canvas(iframe.contentDocument.body, { useCORS: true, allowTaint: true });
-      const base64Image = canvas.toDataURL('image/jpeg', 0.8);
-      
-      const res = await authFetch('/api/projects/' + projectId + '/thumbnail', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64Image })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setThumbnailUrl(data.url);
-      }
-    } catch (err) {
-      console.error('Failed to capture thumbnail:', err);
-    }
-  };
 
   /* ── generate ────────────────────────────────── */
   const handleGenerate = async (e) => {
@@ -214,41 +90,28 @@ export default function Editor() {
       if (!data.code) throw new Error('No code returned from server.');
 
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      
-      // Update files with AI generated files
-      let newFiles = [...files];
-      if (data.files && data.files.length > 0) {
-        data.files.forEach(aiFile => {
-          const idx = newFiles.findIndex(f => f.filename === aiFile.filename);
-          if (idx !== -1) {
-            newFiles[idx] = { ...newFiles[idx], content: aiFile.content };
-          } else {
-            newFiles.push({ id: 'new_' + Date.now() + Math.random(), filename: aiFile.filename, content: aiFile.content, file_type: aiFile.filename.split('.').pop() });
-          }
-        });
-        setActiveHtmlFile(data.files.find(f => f.filename.endsWith('.html'))?.filename || 'index.html');
-      } else if (data.code) {
-        // Fallback if AI didn't return JSON
-        let mainFileIndex = newFiles.findIndex(f => f.filename === 'index.html');
-        if (mainFileIndex === -1 && newFiles.length > 0) mainFileIndex = 0;
-        if (mainFileIndex !== -1) {
-          newFiles[mainFileIndex] = { ...newFiles[mainFileIndex], content: data.code };
-        } else {
-          newFiles.push({ id: 'new_' + Date.now(), filename: 'index.html', content: data.code, file_type: 'html' });
-        }
-      }
-      
-      setFiles(newFiles);
+      setCode(data.code);
       setIframeKey(k => k + 1);
-      setHistory(prev => [{ prompt, code: data.code, files: data.files, time: new Date().toLocaleTimeString(), elapsed }, ...prev]);
+      setHistory(prev => [{ prompt, code: data.code, time: new Date().toLocaleTimeString(), elapsed }, ...prev]);
       if (data.tokens_used !== undefined) setTokenInfo({ tokens_used: data.tokens_used, tokens_limit: data.tokens_limit });
       setPrompt('');
       setActiveTab('preview');
       setSuccess(`✓ ${t('generatedIn')} ${elapsed}s`);
-      
-      // Auto-capture thumbnail after a delay to allow rendering
-      if (id) {
-        setTimeout(() => captureThumbnail(id), 2000);
+
+      // Auto-save if it's a new project
+      if (!id) {
+        try {
+          const res = await authFetch('/api/projects', {
+            method: 'POST',
+            body: JSON.stringify({ name: projectName || 'Generated Project', code: data.code, is_public: false }),
+          });
+          if (res.ok) {
+            const newProject = await res.json();
+            navigate(`/editor/${newProject.id}`, { replace: true });
+          }
+        } catch (e) {
+          console.error('Auto-save failed:', e);
+        }
       }
     } catch (err) {
       setError(err.message || t('failedGenerate'));
@@ -263,42 +126,23 @@ export default function Editor() {
     setError('');
     try {
       if (id) {
-        const compiledCode = getCompiledCode();
-        
-        // 1. Update project metadata
+        // Update existing project
         const res = await authFetch(`/api/projects/${id}`, {
           method: 'PUT',
-          body: JSON.stringify({ name: projectName, description, thumbnail_url: thumbnailUrl, price: Number(price), code: compiledCode }),
+          body: JSON.stringify({ name: projectName, description, thumbnail_url: thumbnailUrl, price: Number(price), code }),
         });
         if (!res.ok) throw new Error('Update failed');
-        
-        // 2. Save individual files
-        for (const f of files) {
-          if (String(f.id).startsWith('fallback') || String(f.id).startsWith('new_')) {
-            await authFetch(`/api/projects/${id}/files`, {
-               method: 'POST', 
-               body: JSON.stringify({ filename: f.filename, content: f.content, file_type: f.filename.split('.').pop() })
-            });
-          } else {
-            await authFetch(`/api/projects/${id}/files/${f.id}`, {
-               method: 'PUT', 
-               body: JSON.stringify({ filename: f.filename, content: f.content })
-            });
-          }
-        }
-        
-        // Reload files to get real DB IDs
-        const fRes = await authFetch(`/api/projects/${id}/files`);
-        if (fRes.ok) {
-           const newFiles = await fRes.json();
-           if(newFiles.length > 0) {
-             setFiles(newFiles);
-             if (String(activeFileId).startsWith('fallback') || String(activeFileId).startsWith('new_')) {
-               setActiveFileId(newFiles.find(f => f.filename === files.find(old => old.id === activeFileId)?.filename)?.id || newFiles[0].id);
-             }
-           }
-        }
         setSuccess(t('projectSaved'));
+      } else {
+        // Create new project
+        const res = await authFetch('/api/projects', {
+          method: 'POST',
+          body: JSON.stringify({ name: projectName, description, thumbnail_url: thumbnailUrl, price: Number(price), code, is_public: false }),
+        });
+        if (!res.ok) throw new Error('Create failed');
+        const newProject = await res.json();
+        setSuccess(t('projectCreated'));
+        navigate(`/editor/${newProject.id}`, { replace: true });
       }
     } catch (err) {
       setError(`${t('failedSave')}: ${err.message}`);
@@ -307,47 +151,11 @@ export default function Editor() {
     }
   };
 
-  const handleAddFile = () => {
-    const name = window.prompt(t('lang') === 'ar' ? 'اسم الملف الجديد (مثال: style.css):' : 'New file name (e.g., style.css):');
-    if (!name) return;
-    const newId = 'new_' + Date.now();
-    setFiles([...files, { id: newId, filename: name, content: '', file_type: name.split('.').pop() }]);
-    setActiveFileId(newId);
-    setActiveTab('code');
-  };
-
-  const handleDeleteFile = async (fileId, e) => {
-    e.stopPropagation();
-    if (!window.confirm(t('lang') === 'ar' ? 'هل أنت متأكد من حذف هذا الملف؟' : 'Are you sure you want to delete this file?')) return;
-    
-    if (!String(fileId).startsWith('new_') && !String(fileId).startsWith('fallback')) {
-      try {
-        await authFetch(`/api/projects/${id}/files/${fileId}`, { method: 'DELETE' });
-      } catch (err) {
-        console.error('Failed to delete file', err);
-      }
-    }
-    
-    const newFiles = files.filter(f => f.id !== fileId);
-    setFiles(newFiles);
-    if (activeFileId === fileId) {
-      setActiveFileId(newFiles.length > 0 ? newFiles[0].id : null);
-    }
-  };
-
   const handleKeyDown = (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') handleGenerate(e);
   };
 
   const [activeTab, setActiveTab] = useState('preview');
-  const activeFile = files.find(f => f.id === activeFileId);
-
-  const getFileIcon = (filename) => {
-    if (filename.endsWith('.html')) return <Code2 size={14} className="text-orange-400" />;
-    if (filename.endsWith('.css')) return <FileType2 size={14} className="text-blue-400" />;
-    if (filename.endsWith('.js')) return <FileJson size={14} className="text-yellow-400" />;
-    return <FileCode size={14} className="text-slate-400" />;
-  };
 
   return (
     <div className="h-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden">
@@ -390,16 +198,13 @@ export default function Editor() {
               <span className="text-slate-500">{tokenInfo.tokens_limit.toLocaleString()}</span>
             </div>
           )}
-              <button
-            onClick={() => { handleSave(); setTimeout(() => captureThumbnail(id), 500); }}
+          <button
+            onClick={handleSave}
             disabled={saving}
             className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors"
           >
             {saving ? <Loader className="animate-spin" size={14} /> : <Save size={14} />}
-            {saving ? t('saving') : t('save')}
-          </button>
-          <button onClick={() => captureThumbnail(id)} className="bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors" title="Capture Thumbnail">
-            <Camera size={14} />
+            {saving ? t('saving') : id ? t('save') : t('saveAsNew')}
           </button>
           <LangToggle />
           <Link to="/dashboard" className="text-slate-400 hover:text-white text-sm">{t('myProjects')}</Link>
@@ -422,40 +227,8 @@ export default function Editor() {
 
       {/* ── Body ── */}
       <div className="flex flex-1 overflow-hidden">
-        {/* ── Sidebar (File Explorer + AI) ── */}
+        {/* ── Sidebar ── */}
         <div className="w-72 shrink-0 border-r border-slate-800 bg-slate-900/50 flex flex-col overflow-hidden">
-          
-          {/* Files */}
-          <div className="flex-1 flex flex-col min-h-0 border-b border-slate-800">
-            <div className="flex items-center justify-between p-3 border-b border-slate-800">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">{t('lang') === 'ar' ? 'الملفات' : 'Files'}</span>
-              <button onClick={handleAddFile} className="text-slate-400 hover:text-white transition-colors">
-                <Plus size={16} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {files.map(f => (
-                <div 
-                  key={f.id} 
-                  onClick={() => { setActiveFileId(f.id); setActiveTab('code'); }}
-                  className={`flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${activeFileId === f.id ? 'bg-indigo-600/20 text-indigo-300' : 'text-slate-300 hover:bg-slate-800'}`}
-                >
-                  <div className="flex items-center gap-2">
-                    {getFileIcon(f.filename)}
-                    <span>{f.filename}</span>
-                  </div>
-                  <button 
-                    onClick={(e) => handleDeleteFile(f.id, e)}
-                    className="text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* AI Assistant */}
           <div className="p-4 flex-1 flex flex-col min-h-0 overflow-y-auto">
             <h2 className="text-sm font-bold text-white mb-3 flex items-center gap-1.5">
               <Sparkles size={14} className="text-indigo-400" /> {t('aiAssistant')}
@@ -498,23 +271,7 @@ export default function Editor() {
                     {history.map((item, idx) => (
                       <button
                         key={idx}
-                        onClick={() => { 
-                          let newFiles = [...files];
-                          if (item.files && item.files.length > 0) {
-                            item.files.forEach(aiFile => {
-                              const fIdx = newFiles.findIndex(f => f.filename === aiFile.filename);
-                              if (fIdx !== -1) newFiles[fIdx] = { ...newFiles[fIdx], content: aiFile.content };
-                              else newFiles.push({ id: 'new_' + Date.now() + Math.random(), filename: aiFile.filename, content: aiFile.content, file_type: aiFile.filename.split('.').pop() });
-                            });
-                          } else if (item.code) {
-                            let mainFileIndex = newFiles.findIndex(f => f.filename === 'index.html');
-                            if (mainFileIndex === -1 && newFiles.length > 0) mainFileIndex = 0;
-                            if (mainFileIndex !== -1) newFiles[mainFileIndex] = { ...newFiles[mainFileIndex], content: item.code };
-                          }
-                          setFiles(newFiles);
-                          setIframeKey(k => k + 1); 
-                          setActiveTab('preview'); 
-                        }}
+                        onClick={() => { setCode(item.code); setIframeKey(k => k + 1); setActiveTab('preview'); }}
                         className="w-full text-left p-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors group"
                       >
                         <div className="text-xs text-slate-200 group-hover:text-white truncate">{item.prompt}</div>
@@ -613,34 +370,34 @@ export default function Editor() {
 
             {/* Always-mounted iframe */}
             <iframe
-              ref={iframeRef}
               key={iframeKey}
               title="Preview"
-              srcDoc={compiledSrcDoc}
-              className="w-full h-full border-0 bg-white"
+              srcDoc={
+                code + 
+                `<script>
+                  document.addEventListener('click', function(e) {
+                    var a = e.target.closest('a');
+                    if (a) {
+                      var href = a.getAttribute('href');
+                      if (href && (href.startsWith('/') || href === '#' || href.startsWith('?'))) {
+                        e.preventDefault();
+                      }
+                    }
+                  });
+                </script>`
+              }
+              className="w-full h-full border-0"
               style={{ display: activeTab === 'preview' ? 'block' : 'none' }}
               sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
             />
 
-            {activeTab === 'code' && activeFile && (
-              <div className="absolute inset-0 w-full h-full bg-slate-900 flex flex-col">
-                <div className="bg-slate-800/50 px-4 py-2 border-b border-slate-800 text-xs text-slate-400 flex items-center gap-2">
-                  {getFileIcon(activeFile.filename)}
-                  {activeFile.filename}
-                </div>
-                <textarea
-                  value={activeFile.content}
-                  onChange={e => setFiles(files.map(f => f.id === activeFileId ? { ...f, content: e.target.value } : f))}
-                  className="flex-1 w-full bg-slate-900 p-4 text-sm leading-relaxed text-slate-300 font-mono border-none focus:outline-none resize-none"
-                  spellCheck={false}
-                />
-              </div>
-            )}
-            
-            {activeTab === 'code' && !activeFile && (
-              <div className="absolute inset-0 flex items-center justify-center text-slate-500">
-                {t('lang') === 'ar' ? 'حدد ملفاً لتعديله' : 'Select a file to edit'}
-              </div>
+            {activeTab === 'code' && (
+              <textarea
+                value={code}
+                onChange={e => setCode(e.target.value)}
+                className="absolute inset-0 w-full h-full bg-slate-900 p-4 text-xs text-slate-300 font-mono border-none focus:outline-none resize-none"
+                spellCheck={false}
+              />
             )}
           </div>
         </div>
