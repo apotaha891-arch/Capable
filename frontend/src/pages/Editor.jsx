@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
-import { Sparkles, Send, Code2, Eye, Loader, Save, AlertCircle, CheckCircle, Clock, ChevronDown, ChevronUp, Zap, Settings, X, Plus, FileCode, FileType2, FileJson, Camera } from 'lucide-react';
+import { Sparkles, Send, Code2, Eye, Loader, Save, AlertCircle, CheckCircle, Clock, ChevronDown, ChevronUp, Zap, Settings, X, Plus, FileCode, FileType2, FileJson, Camera, Globe } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
@@ -42,6 +42,7 @@ export default function Editor() {
   const [description, setDescription] = useState('');
   const [thumbnailUrl, setThumbnailUrl] = useState('');
   const [price, setPrice] = useState(0);
+  const [customDomain, setCustomDomain] = useState('');
   const [editingName, setEditingName] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   
@@ -62,10 +63,11 @@ export default function Editor() {
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(p => { 
         loadedProject = p;
-        setProjectName(p.name || t('untitled')); 
+        setProjectName(p.name || t('untitled'));
         setDescription(p.description || '');
         setThumbnailUrl(p.thumbnail_url || '');
         setPrice(p.price || 0);
+        setCustomDomain(p.custom_domain || '');
         return authFetch(`/api/projects/${id}/files`);
       })
       .then(r => r.ok ? r.json() : [])
@@ -120,8 +122,8 @@ export default function Editor() {
     let scriptContent = '';
     
     files.forEach(f => {
-      if (f.filename.endsWith('.css')) styleContent += `n${f.content}`;
-      if (f.filename.endsWith('.js')) scriptContent += `n${f.content}`;
+      if (f.filename.endsWith('.css')) styleContent += `\n${f.content}`;
+      if (f.filename.endsWith('.js')) scriptContent += `\n${f.content}`;
     });
     
     if (styleContent) {
@@ -143,28 +145,36 @@ export default function Editor() {
     return htmlContent;
   };
 
-  const compiledSrcDoc = getCompiledCode() + 
+  const compiledSrcDoc = React.useMemo(() => getCompiledCode() +
     `<script>
-      // Intercept all link clicks to handle internal routing
       document.addEventListener('click', function(e) {
         var a = e.target.closest('a');
-        if (a) {
-          var href = a.getAttribute('href');
-          if (href && href.startsWith('#')) return; // allow anchor smooth scrolling
-          e.preventDefault();
-          if (href && !href.startsWith('http') && !href.startsWith('javascript:')) {
-            window.parent.postMessage({ type: 'NAVIGATE', href: href }, '*');
-          } else if (href) {
-            alert('External navigation is disabled in preview mode.');
+        if (!a) return;
+        var href = a.getAttribute('href');
+        e.preventDefault();
+        if (!href) return;
+        if (href.startsWith('#')) {
+          if (href.length > 1) {
+            var target = document.querySelector(href);
+            if (target) target.scrollIntoView({ behavior: 'smooth' });
+          } else {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
           }
+          return;
         }
+        if (href.startsWith('http') || href.startsWith('javascript:')) {
+          alert('External navigation is disabled in preview mode.');
+          return;
+        }
+        window.parent.postMessage({ type: 'NAVIGATE', href: href }, '*');
       });
-      // Intercept form submissions
       document.addEventListener('submit', function(e) {
         e.preventDefault();
         alert('Form submission is disabled in preview mode.');
       });
-    </script>`;
+    </script>`,
+    [files, activeHtmlFile]
+  );
 
   /* ── auto capture thumbnail ───────────────────── */
   const captureThumbnail = async (projectId) => {
@@ -268,7 +278,7 @@ export default function Editor() {
         // 1. Update project metadata
         const res = await authFetch(`/api/projects/${id}`, {
           method: 'PUT',
-          body: JSON.stringify({ name: projectName, description, thumbnail_url: thumbnailUrl, price: Number(price), code: compiledCode }),
+          body: JSON.stringify({ name: projectName, description, thumbnail_url: thumbnailUrl, price: Number(price), code: compiledCode, custom_domain: customDomain || null }),
         });
         if (!res.ok) throw new Error('Update failed');
         
@@ -567,11 +577,27 @@ export default function Editor() {
                     <label className="block text-sm font-medium text-slate-300 mb-1">{t('price')}</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-                      <input 
+                      <input
                         type="number" min="0" value={price} onChange={e => setPrice(e.target.value)}
                         className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none"
                       />
                     </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1 flex items-center gap-1.5">
+                      <Globe size={14} className="text-emerald-400" />
+                      {t('lang') === 'ar' ? 'النطاق المخصص' : 'Custom Domain'}
+                    </label>
+                    <input
+                      type="text" value={customDomain} onChange={e => setCustomDomain(e.target.value)}
+                      placeholder="app.example.com"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">
+                      {t('lang') === 'ar' ? 'وجه CNAME الخاص بنطاقك إلى ' : 'Point your domain CNAME to '}
+                      <span className="text-slate-400 font-mono">capable.app</span>
+                      {t('lang') === 'ar' ? ' بعد النشر.' : ' after publishing.'}
+                    </p>
                   </div>
                 </div>
                 <div className="p-5 border-t border-slate-800 flex justify-end gap-3">

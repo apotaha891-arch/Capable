@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <title>Login UI</title>
+</head>
+<body class="bg-slate-900 text-white font-sans h-screen flex">
+  <div class="hidden lg:block w-1/2 relative overflow-hidden">
+    <div class="absolute inset-0 bg-indigo-600/20 mix-blend-multiply z-10"></div>
+    <img src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop" class="w-full h-full object-cover" />
+    <div class="absolute bottom-12 left-12 z-20 max-w-md">
+      <h2 class="text-4xl font-bold mb-4">Welcome back to the future.</h2>
+      <p class="text-indigo-100/80">Log in to your account to continue building incredible things with our AI-powered platform.</p>
+    </div>
+  </div>
+
+  <div class="w-full lg:w-1/2 flex items-center justify-center p-8">
+    <div class="w-full max-w-md bg-slate-800/50 backdrop-blur-xl p-8 rounded-3xl border border-slate-700/50 shadow-2xl">
+      <h1 class="text-3xl font-bold mb-2">Sign in</h1>
+      <p class="text-slate-400 mb-8">Don't have an account? <a href="#" class="text-indigo-400 hover:text-indigo-300">Create one</a></p>
+
+      <form class="space-y-5">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Email</label>
+          <input type="email" placeholder="you@example.com" class="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Password</label>
+          <input type="password" placeholder="••••••••" class="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-4 py-3 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors" />
+        </div>
+        <div class="flex items-center justify-between">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-indigo-600 focus:ring-indigo-600 focus:ring-offset-slate-800" />
+            <span class="text-sm text-slate-400">Remember me</span>
+          </label>
+          <a href="#" class="text-sm text-indigo-400 hover:text-indigo-300">Forgot password?</a>
+        </div>
+        <button class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition-colors shadow-lg shadow-indigo-500/20">Sign In</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>

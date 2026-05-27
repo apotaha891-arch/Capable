@@ -2,7 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import Database from 'better-sqlite3';
+import pkg from 'pg';
+const { Pool } = pkg;
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import path from 'path';
@@ -17,60 +18,70 @@ const port = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'capable_secret_change_in_production';
 
 // ── Database ──────────────────────────────────────────────────────────────────
-const db = new Database('projects.db');
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE NOT NULL,
-    name TEXT NOT NULL,
-    password_hash TEXT NOT NULL,
-    plan TEXT DEFAULT 'free',
-    tokens_used INTEGER DEFAULT 0,
-    tokens_limit INTEGER DEFAULT 50000,
-    created_at TEXT DEFAULT (datetime('now'))
-  );
+async function initDB() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        plan TEXT DEFAULT 'free',
+        tokens_used INTEGER DEFAULT 0,
+        tokens_limit INTEGER DEFAULT 50000,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
 
-  CREATE TABLE IF NOT EXISTS projects (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    code TEXT NOT NULL DEFAULT '',
-    author TEXT,
-    likes INTEGER DEFAULT 0,
-    views INTEGER DEFAULT 0,
-    is_public BOOLEAN DEFAULT 0,
-    is_published BOOLEAN DEFAULT 0,
-    published_slug TEXT UNIQUE,
-    custom_domain TEXT,
-    description TEXT,
-    thumbnail_url TEXT,
-    price INTEGER DEFAULT 0,
-    last_edited TEXT DEFAULT (datetime('now')),
-    created_at TEXT DEFAULT (datetime('now'))
-  );
+      CREATE TABLE IF NOT EXISTS projects (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        code TEXT DEFAULT '',
+        author TEXT,
+        likes INTEGER DEFAULT 0,
+        views INTEGER DEFAULT 0,
+        is_public BOOLEAN DEFAULT false,
+        is_published BOOLEAN DEFAULT false,
+        published_slug TEXT UNIQUE,
+        custom_domain TEXT,
+        description TEXT,
+        thumbnail_url TEXT,
+        price INTEGER DEFAULT 0,
+        last_edited TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
 
-  CREATE TABLE IF NOT EXISTS project_files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
-    filename TEXT NOT NULL,
-    content TEXT DEFAULT '',
-    file_type TEXT DEFAULT 'html',
-    created_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(project_id, filename)
-  );
+      CREATE TABLE IF NOT EXISTS project_files (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+        filename TEXT NOT NULL,
+        content TEXT DEFAULT '',
+        file_type TEXT DEFAULT 'html',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(project_id, filename)
+      );
 
-  CREATE TABLE IF NOT EXISTS token_usage (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER REFERENCES users(id),
-    project_id INTEGER,
-    tokens_in INTEGER DEFAULT 0,
-    tokens_out INTEGER DEFAULT 0,
-    model TEXT,
-    action TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-  );
-`);
+      CREATE TABLE IF NOT EXISTS token_usage (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        project_id INTEGER,
+        tokens_in INTEGER DEFAULT 0,
+        tokens_out INTEGER DEFAULT 0,
+        model TEXT,
+        action TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('✅ Database schema initialized');
+  } catch (err) {
+    console.error('❌ Database schema initialization failed', err);
+  }
+}
 
 // ── Hosted projects directory ─────────────────────────────────────────────────
 const hostedDir = path.join(__dirname, 'hosted');
@@ -96,7 +107,7 @@ function authMiddleware(req, res, next) {
   }
 }
 
-// Optional auth (doesn't block, just enriches req.user if token present)
+// Optional auth
 function optionalAuth(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
   if (token) {
@@ -107,12 +118,17 @@ function optionalAuth(req, res, next) {
 
 // Plan middleware factory
 function requirePlan(...plans) {
-  return (req, res, next) => {
-    const user = db.prepare('SELECT plan FROM users WHERE id = ?').get(req.user.id);
-    if (!plans.includes(user?.plan)) {
-      return res.status(403).json({ error: 'Upgrade required', requiredPlan: plans[0] });
+  return async (req, res, next) => {
+    try {
+      const { rows } = await pool.query('SELECT plan FROM users WHERE id = $1', [req.user.id]);
+      const user = rows[0];
+      if (!user || !plans.includes(user.plan)) {
+        return res.status(403).json({ error: 'Upgrade required', requiredPlan: plans[0] });
+      }
+      next();
+    } catch (err) {
+      res.status(500).json({ error: 'Database error', details: err.message });
     }
-    next();
   };
 }
 
@@ -129,15 +145,16 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(400).json({ error: 'Email, name, and password are required' });
 
   try {
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-    if (existing) return res.status(409).json({ error: 'Email already in use' });
+    const { rows: existingRows } = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+    if (existingRows.length > 0) return res.status(409).json({ error: 'Email already in use' });
 
     const hash = await bcrypt.hash(password, 10);
-    const result = db.prepare(
-      'INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)'
-    ).run(email.toLowerCase().trim(), name.trim(), hash);
+    const { rows } = await pool.query(
+      'INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3) RETURNING id',
+      [email.toLowerCase().trim(), name.trim(), hash]
+    );
 
-    const user = { id: result.lastInsertRowid, email, name, plan: 'free' };
+    const user = { id: rows[0].id, email, name, plan: 'free' };
     const token = jwt.sign(user, JWT_SECRET, { expiresIn: '30d' });
     res.status(201).json({ token, user });
   } catch (err) {
@@ -152,7 +169,8 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(400).json({ error: 'Email and password are required' });
 
   try {
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase().trim());
+    const { rows } = await pool.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+    const user = rows[0];
     if (!user || !(await bcrypt.compare(password, user.password_hash)))
       return res.status(401).json({ error: 'Invalid email or password' });
 
@@ -165,51 +183,71 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 // GET /api/auth/me
-app.get('/api/auth/me', authMiddleware, (req, res) => {
-  const user = db.prepare(
-    'SELECT id, email, name, plan, tokens_used, tokens_limit, created_at FROM users WHERE id = ?'
-  ).get(req.user.id);
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json(user);
+app.get('/api/auth/me', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, email, name, plan, tokens_used, tokens_limit, created_at FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const user = rows[0];
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
 // PROJECTS ROUTES
 // ══════════════════════════════════════════════════════════════════════════════
 
-// GET /api/projects — user's own projects
-app.get('/api/projects', authMiddleware, (req, res) => {
+// GET /api/projects
+app.get('/api/projects', authMiddleware, async (req, res) => {
   try {
-    const projects = db.prepare(
-      'SELECT id, name, description, thumbnail_url, price, likes, views, is_public, is_published, published_slug, last_edited, created_at FROM projects WHERE user_id = ? ORDER BY last_edited DESC'
-    ).all(req.user.id);
-    res.json(projects);
+    const { rows } = await pool.query(
+      'SELECT id, name, description, thumbnail_url, price, likes, views, is_public, is_published, published_slug, last_edited, created_at FROM projects WHERE user_id = $1 ORDER BY last_edited DESC',
+      [req.user.id]
+    );
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: 'Failed to retrieve projects', details: err.message });
   }
 });
 
-// GET /api/projects/explore — public projects
-app.get('/api/projects/explore', optionalAuth, (req, res) => {
+// GET /api/projects/preview/:id — serve any public project's HTML for inline preview
+app.get('/api/projects/preview/:id', async (req, res) => {
   try {
-    const projects = db.prepare(
+    const { rows } = await pool.query('SELECT code FROM projects WHERE id = $1 AND is_public = true', [req.params.id]);
+    if (rows.length === 0) return res.status(404).send('Not found');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(rows[0].code);
+  } catch (err) {
+    res.status(500).send('Error');
+  }
+});
+
+// GET /api/projects/explore
+app.get('/api/projects/explore', optionalAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
       `SELECT p.id, p.name, p.description, p.thumbnail_url, p.price, p.likes, p.views, p.published_slug, p.last_edited, u.name AS author
        FROM projects p LEFT JOIN users u ON p.user_id = u.id
-       WHERE p.is_public = 1 ORDER BY p.likes DESC, p.created_at DESC LIMIT 50`
-    ).all();
-    res.json(projects);
+       WHERE p.is_public = true AND length(p.code) > 0 ORDER BY p.likes DESC, p.created_at DESC LIMIT 50`
+    );
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
   }
 });
 
 // GET /api/projects/:id
-app.get('/api/projects/:id', authMiddleware, (req, res) => {
+app.get('/api/projects/:id', authMiddleware, async (req, res) => {
   try {
-    const project = db.prepare('SELECT * FROM projects WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+    const { rows } = await pool.query('SELECT * FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    const project = rows[0];
     if (!project) return res.status(404).json({ error: 'Project not found' });
-    // Increment views
-    db.prepare('UPDATE projects SET views = views + 1 WHERE id = ?').run(req.params.id);
+    
+    await pool.query('UPDATE projects SET views = views + 1 WHERE id = $1', [req.params.id]);
     res.json(project);
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
@@ -217,39 +255,41 @@ app.get('/api/projects/:id', authMiddleware, (req, res) => {
 });
 
 // POST /api/projects
-app.post('/api/projects', authMiddleware, (req, res) => {
+app.post('/api/projects', authMiddleware, async (req, res) => {
   try {
     const { name, description, thumbnail_url, price, code = '', is_public = false } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
 
-    const info = db.prepare(
-      'INSERT INTO projects (user_id, name, description, thumbnail_url, price, code, author, is_public, last_edited) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(req.user.id, name, description || null, thumbnail_url || null, price || 0, code, req.user.name, is_public ? 1 : 0, new Date().toISOString());
+    const { rows } = await pool.query(
+      'INSERT INTO projects (user_id, name, description, thumbnail_url, price, code, author, is_public, last_edited) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW()) RETURNING *',
+      [req.user.id, name, description || null, thumbnail_url || null, price || 0, code, req.user.name, is_public]
+    );
 
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid);
-    res.status(201).json(project);
+    res.status(201).json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Failed to create project', details: err.message });
   }
 });
 
 // PUT /api/projects/:id
-app.put('/api/projects/:id', authMiddleware, (req, res) => {
+app.put('/api/projects/:id', authMiddleware, async (req, res) => {
   try {
-    const { name, description, thumbnail_url, price, code, is_public } = req.body;
-    const project = db.prepare('SELECT id FROM projects WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
-    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const { name, description, thumbnail_url, price, code, is_public, custom_domain } = req.body;
+    const { rows: projRows } = await pool.query('SELECT id FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (projRows.length === 0) return res.status(404).json({ error: 'Project not found' });
 
-    db.prepare(`UPDATE projects SET
-      name = COALESCE(?, name),
-      description = COALESCE(?, description),
-      thumbnail_url = COALESCE(?, thumbnail_url),
-      price = COALESCE(?, price),
-      code = COALESCE(?, code),
-      is_public = COALESCE(?, is_public),
-      last_edited = ?
-      WHERE id = ?`
-    ).run(name ?? null, description ?? null, thumbnail_url ?? null, price ?? null, code ?? null, is_public !== undefined ? (is_public ? 1 : 0) : null, new Date().toISOString(), req.params.id);
+    await pool.query(`UPDATE projects SET
+      name = COALESCE($1, name),
+      description = COALESCE($2, description),
+      thumbnail_url = COALESCE($3, thumbnail_url),
+      price = COALESCE($4, price),
+      code = COALESCE($5, code),
+      is_public = COALESCE($6, is_public),
+      custom_domain = COALESCE($7, custom_domain),
+      last_edited = NOW()
+      WHERE id = $8`,
+      [name ?? null, description ?? null, thumbnail_url ?? null, price ?? null, code ?? null, is_public ?? null, custom_domain ?? null, req.params.id]
+    );
 
     res.json({ success: true });
   } catch (err) {
@@ -258,11 +298,11 @@ app.put('/api/projects/:id', authMiddleware, (req, res) => {
 });
 
 // POST /api/projects/:id/thumbnail
-app.post('/api/projects/:id/thumbnail', authMiddleware, (req, res) => {
+app.post('/api/projects/:id/thumbnail', authMiddleware, async (req, res) => {
   try {
-    const { image } = req.body; // base64 string
-    const project = db.prepare('SELECT id FROM projects WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
-    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const { image } = req.body; 
+    const { rows } = await pool.query('SELECT id FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Project not found' });
 
     if (!image || !image.startsWith('data:image/')) {
       return res.status(400).json({ error: 'Invalid image data' });
@@ -278,7 +318,7 @@ app.post('/api/projects/:id/thumbnail', authMiddleware, (req, res) => {
     const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
     const url = `${baseUrl}/hosted/thumbnails/${filename}`;
 
-    db.prepare('UPDATE projects SET thumbnail_url = ? WHERE id = ?').run(url, req.params.id);
+    await pool.query('UPDATE projects SET thumbnail_url = $1 WHERE id = $2', [url, req.params.id]);
     res.json({ success: true, url });
   } catch (err) {
     res.status(500).json({ error: 'Failed to save thumbnail', details: err.message });
@@ -286,11 +326,11 @@ app.post('/api/projects/:id/thumbnail', authMiddleware, (req, res) => {
 });
 
 // DELETE /api/projects/:id
-app.delete('/api/projects/:id', authMiddleware, (req, res) => {
+app.delete('/api/projects/:id', authMiddleware, async (req, res) => {
   try {
-    const info = db.prepare('DELETE FROM projects WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
-    if (info.changes === 0) return res.status(404).json({ error: 'Project not found' });
-    // Clean up hosted files if any
+    const result = await pool.query('DELETE FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Project not found' });
+    
     const projectDir = path.join(hostedDir, req.params.id.toString());
     if (fs.existsSync(projectDir)) fs.rmSync(projectDir, { recursive: true });
     res.json({ success: true });
@@ -299,21 +339,20 @@ app.delete('/api/projects/:id', authMiddleware, (req, res) => {
   }
 });
 
-// POST /api/projects/:id/publish — publish project
-app.post('/api/projects/:id/publish', authMiddleware, (req, res) => {
+// POST /api/projects/:id/publish
+app.post('/api/projects/:id/publish', authMiddleware, async (req, res) => {
   try {
-    const project = db.prepare('SELECT * FROM projects WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+    const { rows } = await pool.query('SELECT * FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    const project = rows[0];
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
-    // Generate slug if none
     const slug = project.published_slug || `p-${req.params.id}-${Date.now().toString(36)}`;
     const projectDir = path.join(hostedDir, slug);
     if (!fs.existsSync(projectDir)) fs.mkdirSync(projectDir, { recursive: true });
 
-    // Write index.html
     fs.writeFileSync(path.join(projectDir, 'index.html'), project.code, 'utf-8');
 
-    db.prepare('UPDATE projects SET is_published = 1, published_slug = ?, is_public = 1 WHERE id = ?').run(slug, req.params.id);
+    await pool.query('UPDATE projects SET is_published = true, published_slug = $1, is_public = true WHERE id = $2', [slug, req.params.id]);
 
     const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
     res.json({ success: true, url: `${baseUrl}/hosted/${slug}/index.html`, slug });
@@ -323,16 +362,17 @@ app.post('/api/projects/:id/publish', authMiddleware, (req, res) => {
 });
 
 // POST /api/projects/:id/unpublish
-app.post('/api/projects/:id/unpublish', authMiddleware, (req, res) => {
+app.post('/api/projects/:id/unpublish', authMiddleware, async (req, res) => {
   try {
-    const project = db.prepare('SELECT published_slug FROM projects WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
+    const { rows } = await pool.query('SELECT published_slug FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    const project = rows[0];
     if (!project) return res.status(404).json({ error: 'Not found' });
 
     if (project.published_slug) {
       const dir = path.join(hostedDir, project.published_slug);
       if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true });
     }
-    db.prepare('UPDATE projects SET is_published = 0, is_public = 0 WHERE id = ?').run(req.params.id);
+    await pool.query('UPDATE projects SET is_published = false, is_public = false WHERE id = $1', [req.params.id]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to unpublish', details: err.message });
@@ -340,28 +380,27 @@ app.post('/api/projects/:id/unpublish', authMiddleware, (req, res) => {
 });
 
 // POST /api/projects/:id/clone
-app.post('/api/projects/:id/clone', authMiddleware, (req, res) => {
+app.post('/api/projects/:id/clone', authMiddleware, async (req, res) => {
   try {
-    const source = db.prepare('SELECT * FROM projects WHERE id = ? AND (user_id = ? OR is_public = 1)').get(req.params.id, req.user.id);
+    const { rows: sourceRows } = await pool.query('SELECT * FROM projects WHERE id = $1 AND (user_id = $2 OR is_public = true)', [req.params.id, req.user.id]);
+    const source = sourceRows[0];
     if (!source) return res.status(404).json({ error: 'Project not found' });
 
-    // 1. Clone Project Record
-    const info = db.prepare(
-      'INSERT INTO projects (user_id, name, description, thumbnail_url, price, code, author, is_public, last_edited) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)'
-    ).run(req.user.id, `${source.name} (Clone)`, source.description, source.thumbnail_url, 0, source.code, req.user.name, new Date().toISOString());
-    
-    const newProjectId = info.lastInsertRowid;
+    const { rows: newProjRows } = await pool.query(
+      'INSERT INTO projects (user_id, name, description, thumbnail_url, price, code, author, is_public, last_edited) VALUES ($1, $2, $3, $4, $5, $6, $7, false, NOW()) RETURNING id',
+      [req.user.id, `${source.name} (Clone)`, source.description, source.thumbnail_url, 0, source.code, req.user.name]
+    );
+    const newProjectId = newProjRows[0].id;
 
-    // 2. Clone Project Files
-    const sourceFiles = db.prepare('SELECT * FROM project_files WHERE project_id = ?').all(source.id);
+    const { rows: sourceFiles } = await pool.query('SELECT * FROM project_files WHERE project_id = $1', [source.id]);
+    
     if (sourceFiles.length > 0) {
-      const insertFile = db.prepare('INSERT INTO project_files (project_id, filename, content, file_type) VALUES (?, ?, ?, ?)');
-      const cloneFilesTx = db.transaction((files) => {
-        for (const file of files) {
-          insertFile.run(newProjectId, file.filename, file.content, file.file_type);
-        }
-      });
-      cloneFilesTx(sourceFiles);
+      for (const file of sourceFiles) {
+        await pool.query(
+          'INSERT INTO project_files (project_id, filename, content, file_type) VALUES ($1, $2, $3, $4)',
+          [newProjectId, file.filename, file.content, file.file_type]
+        );
+      }
     }
 
     res.status(201).json({ id: newProjectId });
@@ -375,11 +414,12 @@ app.post('/api/projects/:id/clone', authMiddleware, (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 // GET /api/projects/:id/files
-app.get('/api/projects/:id/files', authMiddleware, (req, res) => {
+app.get('/api/projects/:id/files', authMiddleware, async (req, res) => {
   try {
-    const project = db.prepare('SELECT id FROM projects WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
-    if (!project) return res.status(404).json({ error: 'Project not found' });
-    const files = db.prepare('SELECT * FROM project_files WHERE project_id = ? ORDER BY filename').all(req.params.id);
+    const { rows: pRows } = await pool.query('SELECT id FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (pRows.length === 0) return res.status(404).json({ error: 'Project not found' });
+    
+    const { rows: files } = await pool.query('SELECT * FROM project_files WHERE project_id = $1 ORDER BY filename', [req.params.id]);
     res.json(files);
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
@@ -387,31 +427,40 @@ app.get('/api/projects/:id/files', authMiddleware, (req, res) => {
 });
 
 // POST /api/projects/:id/files
-app.post('/api/projects/:id/files', authMiddleware, (req, res) => {
+app.post('/api/projects/:id/files', authMiddleware, async (req, res) => {
   try {
     const { filename, content = '', file_type = 'html' } = req.body;
     if (!filename) return res.status(400).json({ error: 'Filename required' });
-    const project = db.prepare('SELECT id FROM projects WHERE id = ? AND user_id = ?').get(req.params.id, req.user.id);
-    if (!project) return res.status(404).json({ error: 'Project not found' });
+    
+    const { rows: pRows } = await pool.query('SELECT id FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (pRows.length === 0) return res.status(404).json({ error: 'Project not found' });
 
-    const info = db.prepare(
-      'INSERT OR REPLACE INTO project_files (project_id, filename, content, file_type) VALUES (?, ?, ?, ?)'
-    ).run(req.params.id, filename, content, file_type);
-    res.status(201).json({ id: info.lastInsertRowid, project_id: req.params.id, filename, content, file_type });
+    const { rows } = await pool.query(
+      `INSERT INTO project_files (project_id, filename, content, file_type) 
+       VALUES ($1, $2, $3, $4) 
+       ON CONFLICT (project_id, filename) 
+       DO UPDATE SET content = EXCLUDED.content, file_type = EXCLUDED.file_type 
+       RETURNING id`,
+      [req.params.id, filename, content, file_type]
+    );
+
+    res.status(201).json({ id: rows[0].id, project_id: req.params.id, filename, content, file_type });
   } catch (err) {
     res.status(500).json({ error: 'Failed to create file', details: err.message });
   }
 });
 
 // PUT /api/projects/:projectId/files/:fileId
-app.put('/api/projects/:projectId/files/:fileId', authMiddleware, (req, res) => {
+app.put('/api/projects/:projectId/files/:fileId', authMiddleware, async (req, res) => {
   try {
     const { content, filename } = req.body;
-    const project = db.prepare('SELECT id FROM projects WHERE id = ? AND user_id = ?').get(req.params.projectId, req.user.id);
-    if (!project) return res.status(404).json({ error: 'Not found' });
+    const { rows: pRows } = await pool.query('SELECT id FROM projects WHERE id = $1 AND user_id = $2', [req.params.projectId, req.user.id]);
+    if (pRows.length === 0) return res.status(404).json({ error: 'Not found' });
 
-    db.prepare('UPDATE project_files SET content = COALESCE(?, content), filename = COALESCE(?, filename) WHERE id = ? AND project_id = ?')
-      .run(content ?? null, filename ?? null, req.params.fileId, req.params.projectId);
+    await pool.query(
+      'UPDATE project_files SET content = COALESCE($1, content), filename = COALESCE($2, filename) WHERE id = $3 AND project_id = $4',
+      [content ?? null, filename ?? null, req.params.fileId, req.params.projectId]
+    );
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
@@ -419,9 +468,9 @@ app.put('/api/projects/:projectId/files/:fileId', authMiddleware, (req, res) => 
 });
 
 // DELETE /api/projects/:projectId/files/:fileId
-app.delete('/api/projects/:projectId/files/:fileId', authMiddleware, (req, res) => {
+app.delete('/api/projects/:projectId/files/:fileId', authMiddleware, async (req, res) => {
   try {
-    db.prepare('DELETE FROM project_files WHERE id = ? AND project_id = ?').run(req.params.fileId, req.params.projectId);
+    await pool.query('DELETE FROM project_files WHERE id = $1 AND project_id = $2', [req.params.fileId, req.params.projectId]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
@@ -436,19 +485,20 @@ app.post('/api/generate', authMiddleware, async (req, res) => {
   const { prompt, history, project_id } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
 
-  // Check token limit
-  const user = db.prepare('SELECT tokens_used, tokens_limit, plan FROM users WHERE id = ?').get(req.user.id);
-  if (user.tokens_used >= user.tokens_limit) {
-    return res.status(429).json({
-      error: 'Token limit reached',
-      tokens_used: user.tokens_used,
-      tokens_limit: user.tokens_limit,
-      plan: user.plan,
-      upgrade_required: true,
-    });
-  }
-
   try {
+    const { rows: userRows } = await pool.query('SELECT tokens_used, tokens_limit, plan FROM users WHERE id = $1', [req.user.id]);
+    const user = userRows[0];
+    
+    if (user.tokens_used >= user.tokens_limit) {
+      return res.status(429).json({
+        error: 'Token limit reached',
+        tokens_used: user.tokens_used,
+        tokens_limit: user.tokens_limit,
+        plan: user.plan,
+        upgrade_required: true,
+      });
+    }
+
     const model = genAI.getGenerativeModel({
       model: 'gemini-flash-latest',
       systemInstruction: `You are an expert web developer. Your ONLY job is to output a valid JSON object containing the files for a web project.
@@ -479,39 +529,68 @@ CRITICAL RULES:
     const response = await result.response;
     let text = response.text();
 
-    // Parse JSON
+    // Parse JSON — full parse first, then salvage parser for truncated responses
     let parsedFiles = [];
     let fallbackCode = text;
     try {
       const parsed = JSON.parse(text);
       if (parsed.files && Array.isArray(parsed.files)) {
         parsedFiles = parsed.files;
-        // set fallbackCode to the main html file if possible
-        const mainHtml = parsedFiles.find(f => f.filename === 'index.html' || f.filename.endsWith('.html'));
-        if (mainHtml) fallbackCode = mainHtml.content;
       }
-    } catch (e) {
-      console.error('Failed to parse AI JSON response', e);
-      // Fallback to text if AI failed to return JSON
+    } catch {
+      // Salvage: scan for complete {"filename": "...", "content": "..."} objects.
+      // We accumulate brace depth and string state to find balanced object boundaries.
+      const start = text.indexOf('"files"');
+      if (start !== -1) {
+        let i = text.indexOf('[', start);
+        let depth = 0, inStr = false, esc = false, objStart = -1;
+        while (i < text.length && i !== -1) {
+          const c = text[i];
+          if (inStr) {
+            if (esc) esc = false;
+            else if (c === '\\') esc = true;
+            else if (c === '"') inStr = false;
+          } else {
+            if (c === '"') inStr = true;
+            else if (c === '{') { if (depth === 0) objStart = i; depth++; }
+            else if (c === '}') {
+              depth--;
+              if (depth === 0 && objStart !== -1) {
+                try {
+                  const obj = JSON.parse(text.slice(objStart, i + 1));
+                  if (obj.filename && typeof obj.content === 'string') parsedFiles.push(obj);
+                } catch {}
+                objStart = -1;
+              }
+            }
+          }
+          i++;
+        }
+      }
+      if (parsedFiles.length === 0) console.error('Failed to parse AI JSON response (no salvageable files)');
+      else console.warn(`Salvaged ${parsedFiles.length} file(s) from truncated AI response`);
     }
 
-    // Ensure valid HTML in fallback code
+    const mainHtml = parsedFiles.find(f => f.filename === 'index.html' || f.filename.endsWith('.html'));
+    if (mainHtml) fallbackCode = mainHtml.content;
+
     if (!fallbackCode.toLowerCase().includes('<!doctype') && !fallbackCode.toLowerCase().includes('<html')) {
       fallbackCode = `<!DOCTYPE html><html><head><meta charset="UTF-8"><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-slate-900 text-white p-8">${fallbackCode}</body></html>`;
     }
 
-    // Log token usage
     const usage = response.usageMetadata;
     const tokensIn = usage?.promptTokenCount || 0;
     const tokensOut = usage?.candidatesTokenCount || 0;
     const totalTokens = tokensIn + tokensOut;
 
-    db.prepare('UPDATE users SET tokens_used = tokens_used + ? WHERE id = ?').run(totalTokens, req.user.id);
-    db.prepare('INSERT INTO token_usage (user_id, project_id, tokens_in, tokens_out, model, action) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(req.user.id, project_id || null, tokensIn, tokensOut, 'gemini-flash-latest', 'generate');
+    await pool.query('UPDATE users SET tokens_used = tokens_used + $1 WHERE id = $2', [totalTokens, req.user.id]);
+    await pool.query(
+      'INSERT INTO token_usage (user_id, project_id, tokens_in, tokens_out, model, action) VALUES ($1, $2, $3, $4, $5, $6)',
+      [req.user.id, project_id || null, tokensIn, tokensOut, 'gemini-flash-latest', 'generate']
+    );
 
-    const updatedUser = db.prepare('SELECT tokens_used, tokens_limit FROM users WHERE id = ?').get(req.user.id);
-    res.json({ code: fallbackCode, files: parsedFiles, tokens_used: updatedUser.tokens_used, tokens_limit: updatedUser.tokens_limit });
+    const { rows: updatedUserRows } = await pool.query('SELECT tokens_used, tokens_limit FROM users WHERE id = $1', [req.user.id]);
+    res.json({ code: fallbackCode, files: parsedFiles, tokens_used: updatedUserRows[0].tokens_used, tokens_limit: updatedUserRows[0].tokens_limit });
   } catch (err) {
     console.error('Generation error:', err);
     res.status(500).json({ error: 'Failed to generate', details: err.message });
@@ -522,13 +601,11 @@ CRITICAL RULES:
 // TOKEN USAGE ROUTE
 // ══════════════════════════════════════════════════════════════════════════════
 
-app.get('/api/usage', authMiddleware, (req, res) => {
+app.get('/api/usage', authMiddleware, async (req, res) => {
   try {
-    const user = db.prepare('SELECT tokens_used, tokens_limit, plan FROM users WHERE id = ?').get(req.user.id);
-    const history = db.prepare(
-      'SELECT * FROM token_usage WHERE user_id = ? ORDER BY created_at DESC LIMIT 20'
-    ).all(req.user.id);
-    res.json({ ...user, history });
+    const { rows: uRows } = await pool.query('SELECT tokens_used, tokens_limit, plan FROM users WHERE id = $1', [req.user.id]);
+    const { rows: history } = await pool.query('SELECT * FROM token_usage WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20', [req.user.id]);
+    res.json({ ...uRows[0], history });
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
   }
@@ -538,4 +615,11 @@ app.get('/api/usage', authMiddleware, (req, res) => {
 // START
 // ══════════════════════════════════════════════════════════════════════════════
 
-app.listen(port, () => console.log(`✅ Server running on port ${port}`));
+app.listen(port, async () => {
+  if (process.env.DATABASE_URL) {
+    await initDB();
+  } else {
+    console.warn('⚠️ No DATABASE_URL provided. Please configure Supabase.');
+  }
+  console.log(`✅ Server running on port ${port}`);
+});
