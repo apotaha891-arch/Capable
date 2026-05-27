@@ -9,6 +9,8 @@ import jwt from 'jsonwebtoken';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import crypto from 'crypto';
+import dns from 'dns/promises';
 
 dotenv.config();
 
@@ -76,6 +78,10 @@ async function initDB() {
         action TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
+
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS domain_verified BOOLEAN DEFAULT false;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS domain_verification_token TEXT;
+      CREATE INDEX IF NOT EXISTS idx_projects_custom_domain ON projects(custom_domain) WHERE custom_domain IS NOT NULL;
     `);
     console.log('✅ Database schema initialized');
   } catch (err) {
@@ -93,6 +99,30 @@ if (!fs.existsSync(thumbnailsDir)) fs.mkdirSync(thumbnailsDir, { recursive: true
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+// Host-based routing for verified custom domains. Skipped on localhost and for API/hosted/uploads paths.
+const SYSTEM_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
+app.use(async (req, res, next) => {
+  if (req.path.startsWith('/api/') || req.path.startsWith('/hosted/')) return next();
+  const host = (req.hostname || '').toLowerCase();
+  if (!host || SYSTEM_HOSTS.has(host)) return next();
+  try {
+    const { rows } = await pool.query(
+      `SELECT published_slug FROM projects
+       WHERE LOWER(custom_domain) = $1 AND domain_verified = true AND is_published = true
+       LIMIT 1`,
+      [host]
+    );
+    if (rows.length > 0) {
+      const file = path.join(hostedDir, rows[0].published_slug, 'index.html');
+      if (fs.existsSync(file)) return res.sendFile(file);
+    }
+  } catch (err) {
+    console.error('Custom domain lookup failed:', err.message);
+  }
+  next();
+});
+
 app.use('/hosted', express.static(hostedDir));
 
 // Auth middleware
@@ -376,6 +406,93 @@ app.post('/api/projects/:id/unpublish', authMiddleware, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to unpublish', details: err.message });
+  }
+});
+
+// ── Custom domain verification ───────────────────────────────────────────────
+
+const APEX_TARGET = process.env.CAPABLE_APEX || 'capable.app';
+
+// POST /api/projects/:id/domain/instructions — return DNS instructions and issue token
+app.post('/api/projects/:id/domain/instructions', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT custom_domain, domain_verification_token, domain_verified FROM projects WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Project not found' });
+    const project = rows[0];
+    if (!project.custom_domain) return res.status(400).json({ error: 'No custom domain set on this project' });
+
+    let token = project.domain_verification_token;
+    if (!token) {
+      token = 'cpbl-' + crypto.randomBytes(16).toString('hex');
+      await pool.query('UPDATE projects SET domain_verification_token = $1 WHERE id = $2', [token, req.params.id]);
+    }
+
+    res.json({
+      domain: project.custom_domain,
+      verified: !!project.domain_verified,
+      verification: {
+        type: 'TXT',
+        host: `_capable.${project.custom_domain}`,
+        value: `capable-verify=${token}`,
+      },
+      pointing: {
+        type: 'CNAME',
+        host: project.custom_domain,
+        value: APEX_TARGET,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// POST /api/projects/:id/domain/check — perform DNS TXT lookup to verify ownership
+app.post('/api/projects/:id/domain/check', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT custom_domain, domain_verification_token FROM projects WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Project not found' });
+    const { custom_domain, domain_verification_token } = rows[0];
+    if (!custom_domain || !domain_verification_token) {
+      return res.status(400).json({ error: 'Run /domain/instructions first to issue a token' });
+    }
+
+    let verified = false;
+    let error = null;
+    try {
+      const records = await dns.resolveTxt(`_capable.${custom_domain}`);
+      const flat = records.flat();
+      verified = flat.some(v => v.replace(/\s+/g, '').includes(`capable-verify=${domain_verification_token}`));
+      if (!verified) error = 'TXT record found but token does not match. Double-check the value.';
+    } catch (err) {
+      error = err.code === 'ENODATA' || err.code === 'ENOTFOUND'
+        ? 'TXT record not found. DNS may still be propagating (can take up to an hour).'
+        : `DNS lookup failed: ${err.message}`;
+    }
+
+    await pool.query('UPDATE projects SET domain_verified = $1 WHERE id = $2', [verified, req.params.id]);
+    res.json({ verified, domain: custom_domain, error });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// DELETE /api/projects/:id/domain — clear domain and verification
+app.delete('/api/projects/:id/domain', authMiddleware, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'UPDATE projects SET custom_domain = NULL, domain_verification_token = NULL, domain_verified = false WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Project not found' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
   }
 });
 

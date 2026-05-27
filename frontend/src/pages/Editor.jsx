@@ -1,10 +1,37 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
-import { Sparkles, Send, Code2, Eye, Loader, Save, AlertCircle, CheckCircle, Clock, ChevronDown, ChevronUp, Zap, Settings, X, Plus, FileCode, FileType2, FileJson, Camera, Globe } from 'lucide-react';
+import { Sparkles, Send, Code2, Eye, Loader, Save, AlertCircle, CheckCircle, Clock, ChevronDown, ChevronUp, Zap, Settings, X, Plus, FileCode, FileType2, FileJson, Camera, Globe, Copy, ShieldCheck, ShoppingBag } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
+
+function DnsRow({ label, host, value, onCopy }) {
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs">
+      <div className="grid grid-cols-[60px_1fr_auto] items-center gap-3">
+        <span className="font-bold text-indigo-300 font-mono">{label}</span>
+        <div className="min-w-0">
+          <div className="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Host</div>
+          <div className="text-slate-200 font-mono truncate">{host}</div>
+        </div>
+        <button onClick={() => onCopy(host)} className="text-slate-400 hover:text-white p-1.5 rounded hover:bg-slate-800" title="Copy host">
+          <Copy size={12} />
+        </button>
+      </div>
+      <div className="grid grid-cols-[60px_1fr_auto] items-center gap-3 mt-2 pt-2 border-t border-slate-800">
+        <span></span>
+        <div className="min-w-0">
+          <div className="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Value</div>
+          <div className="text-slate-200 font-mono truncate">{value}</div>
+        </div>
+        <button onClick={() => onCopy(value)} className="text-slate-400 hover:text-white p-1.5 rounded hover:bg-slate-800" title="Copy value">
+          <Copy size={12} />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 const NEW_PROJECT_CODE = `<!DOCTYPE html>
 <html lang="en">
@@ -45,6 +72,10 @@ export default function Editor() {
   const [customDomain, setCustomDomain] = useState('');
   const [editingName, setEditingName] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState('general');
+  const [domainInfo, setDomainInfo] = useState(null);
+  const [domainBusy, setDomainBusy] = useState(false);
+  const [domainMessage, setDomainMessage] = useState(null);
   
   const [tokenInfo, setTokenInfo] = useState(null); 
   const { t } = useLang();
@@ -84,6 +115,13 @@ export default function Editor() {
       })
       .catch(() => navigate('/dashboard'));
   }, [id, navigate, t]);
+
+  /* ── load domain instructions when the deployment tab opens with a domain ─ */
+  useEffect(() => {
+    if (showSettings && settingsTab === 'deployment' && customDomain && !domainInfo) {
+      fetchDomainInfo();
+    }
+  }, [showSettings, settingsTab, customDomain]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── auto-clear notifications ─────────────────── */
   useEffect(() => { if (success) { const timer = setTimeout(() => setSuccess(''), 3000); return () => clearTimeout(timer); } }, [success]);
@@ -317,6 +355,58 @@ export default function Editor() {
     }
   };
 
+  /* ── domain verification ─────────────────────────── */
+  const fetchDomainInfo = async () => {
+    if (!id || !customDomain) { setDomainInfo(null); return; }
+    setDomainBusy(true); setDomainMessage(null);
+    try {
+      const res = await authFetch(`/api/projects/${id}/domain/instructions`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      setDomainInfo(data);
+    } catch (err) {
+      setDomainMessage({ type: 'error', text: err.message });
+    } finally {
+      setDomainBusy(false);
+    }
+  };
+
+  const handleCheckDomain = async () => {
+    setDomainBusy(true); setDomainMessage(null);
+    try {
+      const res = await authFetch(`/api/projects/${id}/domain/check`, { method: 'POST' });
+      const data = await res.json();
+      if (data.verified) {
+        setDomainMessage({ type: 'success', text: t('lang') === 'ar' ? '✓ تم التحقق من الدومين بنجاح' : '✓ Domain verified successfully' });
+        setDomainInfo(prev => prev ? { ...prev, verified: true } : prev);
+      } else {
+        setDomainMessage({ type: 'error', text: data.error || (t('lang') === 'ar' ? 'لم نجد سجل TXT المطابق' : 'Matching TXT record not found') });
+      }
+    } catch (err) {
+      setDomainMessage({ type: 'error', text: err.message });
+    } finally {
+      setDomainBusy(false);
+    }
+  };
+
+  const handleRemoveDomain = async () => {
+    if (!window.confirm(t('lang') === 'ar' ? 'إزالة الدومين المخصص؟' : 'Remove custom domain?')) return;
+    try {
+      await authFetch(`/api/projects/${id}/domain`, { method: 'DELETE' });
+      setCustomDomain('');
+      setDomainInfo(null);
+      setDomainMessage(null);
+    } catch (err) {
+      setDomainMessage({ type: 'error', text: err.message });
+    }
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard?.writeText(text);
+    setDomainMessage({ type: 'success', text: t('lang') === 'ar' ? 'تم النسخ' : 'Copied' });
+    setTimeout(() => setDomainMessage(null), 1500);
+  };
+
   const handleAddFile = () => {
     const name = window.prompt(t('lang') === 'ar' ? 'اسم الملف الجديد (مثال: style.css):' : 'New file name (e.g., style.css):');
     if (!name) return;
@@ -547,8 +637,8 @@ export default function Editor() {
           {/* Settings Modal */}
           {showSettings && (
             <div className="absolute inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl flex flex-col">
-                <div className="flex items-center justify-between p-5 border-b border-slate-800">
+              <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[90vh] shadow-2xl flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between p-5 border-b border-slate-800 shrink-0">
                   <h3 className="text-lg font-bold text-white flex items-center gap-2">
                     <Settings size={20} className="text-indigo-400" /> {t('projectSettings')}
                   </h3>
@@ -556,51 +646,169 @@ export default function Editor() {
                     <X size={20} />
                   </button>
                 </div>
-                <div className="p-5 space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1">{t('description')}</label>
-                    <textarea 
-                      value={description} onChange={e => setDescription(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none min-h-[80px]"
-                      placeholder="e.g. A beautiful landing page for a SaaS..."
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1">{t('thumbnailUrl')}</label>
-                    <input 
-                      type="url" value={thumbnailUrl} onChange={e => setThumbnailUrl(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none"
-                      placeholder="https://example.com/image.png"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1">{t('price')}</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
-                      <input
-                        type="number" min="0" value={price} onChange={e => setPrice(e.target.value)}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1 flex items-center gap-1.5">
-                      <Globe size={14} className="text-emerald-400" />
-                      {t('lang') === 'ar' ? 'النطاق المخصص' : 'Custom Domain'}
-                    </label>
-                    <input
-                      type="text" value={customDomain} onChange={e => setCustomDomain(e.target.value)}
-                      placeholder="app.example.com"
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none"
-                    />
-                    <p className="text-xs text-slate-500 mt-1">
-                      {t('lang') === 'ar' ? 'وجه CNAME الخاص بنطاقك إلى ' : 'Point your domain CNAME to '}
-                      <span className="text-slate-400 font-mono">capable.app</span>
-                      {t('lang') === 'ar' ? ' بعد النشر.' : ' after publishing.'}
-                    </p>
-                  </div>
+
+                {/* Tabs */}
+                <div className="flex border-b border-slate-800 shrink-0">
+                  {[
+                    ['general', t('lang') === 'ar' ? 'عام' : 'General'],
+                    ['deployment', t('lang') === 'ar' ? 'النشر والدومين' : 'Deployment'],
+                  ].map(([key, label]) => (
+                    <button
+                      key={key}
+                      onClick={() => setSettingsTab(key)}
+                      className={`px-5 py-3 text-sm font-medium border-b-2 transition-colors ${settingsTab === key ? 'border-indigo-500 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+                    >{label}</button>
+                  ))}
                 </div>
-                <div className="p-5 border-t border-slate-800 flex justify-end gap-3">
+
+                <div className="p-5 space-y-4 overflow-y-auto flex-1">
+                  {settingsTab === 'general' && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">{t('description')}</label>
+                        <textarea
+                          value={description} onChange={e => setDescription(e.target.value)}
+                          className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none min-h-[80px]"
+                          placeholder="e.g. A beautiful landing page for a SaaS..."
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">{t('thumbnailUrl')}</label>
+                        <input
+                          type="url" value={thumbnailUrl} onChange={e => setThumbnailUrl(e.target.value)}
+                          className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none"
+                          placeholder="https://example.com/image.png"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">{t('price')}</label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                          <input
+                            type="number" min="0" value={price} onChange={e => setPrice(e.target.value)}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {settingsTab === 'deployment' && (
+                    <div className="space-y-5">
+                      {/* Custom domain block */}
+                      <div className="bg-slate-800/40 border border-slate-800 rounded-2xl p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                            <Globe size={15} className="text-emerald-400" />
+                            {t('lang') === 'ar' ? 'النطاق المخصص' : 'Custom Domain'}
+                          </h4>
+                          {domainInfo?.verified && (
+                            <span className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[11px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1">
+                              <ShieldCheck size={11} /> {t('lang') === 'ar' ? 'مُتحقق' : 'Verified'}
+                            </span>
+                          )}
+                          {customDomain && domainInfo && !domainInfo.verified && (
+                            <span className="bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[11px] font-semibold px-2 py-0.5 rounded-full">
+                              {t('lang') === 'ar' ? 'بانتظار التحقق' : 'Pending'}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex gap-2 mb-3">
+                          <input
+                            type="text" value={customDomain} onChange={e => setCustomDomain(e.target.value.trim().toLowerCase())}
+                            placeholder="app.example.com"
+                            className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none"
+                          />
+                          <button
+                            onClick={async () => { await handleSave(); await fetchDomainInfo(); }}
+                            disabled={!customDomain || saving}
+                            className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-medium"
+                          >
+                            {customDomain && domainInfo ? (t('lang') === 'ar' ? 'تحديث' : 'Update') : (t('lang') === 'ar' ? 'حفظ' : 'Save')}
+                          </button>
+                          {customDomain && domainInfo && (
+                            <button onClick={handleRemoveDomain} className="border border-slate-700 hover:border-red-500 hover:text-red-400 text-slate-400 rounded-xl px-3 text-sm">
+                              <X size={14} />
+                            </button>
+                          )}
+                        </div>
+
+                        {!customDomain && (
+                          <p className="text-xs text-slate-500">
+                            {t('lang') === 'ar' ? 'أدخل نطاقك أعلاه وسنُعطيك إعدادات DNS اللازمة.' : 'Enter your domain above and we will give you the DNS records to set.'}
+                          </p>
+                        )}
+
+                        {/* DNS instructions */}
+                        {customDomain && domainInfo && (
+                          <div className="space-y-3 mt-3">
+                            <p className="text-xs text-slate-400">
+                              {t('lang') === 'ar' ? 'أضف هذين السجلّين في لوحة إدارة DNS الخاصة بنطاقك، ثم اضغط "تحقق".' : 'Add these two records in your DNS control panel, then click Verify.'}
+                            </p>
+
+                            <DnsRow label="TXT" host={domainInfo.verification.host} value={domainInfo.verification.value} onCopy={copyToClipboard} />
+                            <DnsRow label="CNAME" host={domainInfo.pointing.host} value={domainInfo.pointing.value} onCopy={copyToClipboard} />
+
+                            <div className="flex items-center gap-2 pt-1">
+                              <button
+                                onClick={handleCheckDomain}
+                                disabled={domainBusy}
+                                className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5"
+                              >
+                                {domainBusy ? <Loader className="animate-spin" size={13} /> : <ShieldCheck size={13} />}
+                                {domainInfo.verified
+                                  ? (t('lang') === 'ar' ? 'إعادة التحقق' : 'Re-check')
+                                  : (t('lang') === 'ar' ? 'تحقق من الدومين' : 'Verify domain')}
+                              </button>
+                              {domainInfo.verified && (
+                                <a href={`http://${customDomain}`} target="_blank" rel="noreferrer" className="text-emerald-400 text-sm hover:underline flex items-center gap-1">
+                                  http://{customDomain}
+                                </a>
+                              )}
+                            </div>
+
+                            {domainMessage && (
+                              <div className={`text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 ${domainMessage.type === 'success' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                                {domainMessage.type === 'success' ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
+                                {domainMessage.text}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Buy a domain placeholder */}
+                      <div className="bg-gradient-to-br from-indigo-900/30 to-purple-900/30 border border-indigo-700/30 rounded-2xl p-4">
+                        <div className="flex items-start justify-between mb-3 gap-3">
+                          <div>
+                            <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                              <ShoppingBag size={15} className="text-indigo-300" />
+                              {t('lang') === 'ar' ? 'ليس لديك دومين؟' : "Don't have a domain?"}
+                            </h4>
+                            <p className="text-xs text-slate-400 mt-1">
+                              {t('lang') === 'ar' ? 'اشترِ دومين عبر Capable واحصل على ربط فوري وSSL مجاني.' : 'Buy a domain through Capable with instant setup and free SSL.'}
+                            </p>
+                          </div>
+                          <span className="bg-amber-500/20 text-amber-300 text-[10px] font-bold px-2 py-1 rounded-full whitespace-nowrap">PRO</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 mb-3 text-xs">
+                          {[['.com', 12], ['.app', 18], ['.io', 39], ['.dev', 14]].map(([tld, price]) => (
+                            <div key={tld} className="bg-slate-900/60 rounded-lg px-3 py-2 flex justify-between items-center">
+                              <span className="text-slate-300 font-mono">{tld}</span>
+                              <span className="text-slate-500">${price}/yr</span>
+                            </div>
+                          ))}
+                        </div>
+                        <button disabled className="w-full bg-slate-800/60 text-slate-500 py-2 rounded-lg text-sm font-medium cursor-not-allowed">
+                          {t('lang') === 'ar' ? 'قريباً' : 'Coming soon'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-5 border-t border-slate-800 flex justify-end gap-3 shrink-0">
                   <button onClick={() => setShowSettings(false)} className="px-4 py-2 text-slate-300 hover:text-white text-sm font-medium">
                     {t('close')}
                   </button>
