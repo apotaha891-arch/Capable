@@ -12,20 +12,85 @@ const en = {
   saveAsNew: 'Save as new',
   edit: 'Edit',
 
-  // Landing
-  heroTitle1: 'Build UI at the',
-  heroTitle2: 'speed of',
-  heroHighlight: 'thought.',
-  heroDesc: 'Capable uses advanced AI to instantly turn your text descriptions into fully functional, beautiful web applications. Stop coding from scratch, start creating.',
+  // Landing — Hero
+  heroBadge: 'Validate ideas before you scale',
+  heroTitle1: "Don't burn a fortune",
+  heroTitle2: 'building something nobody',
+  heroHighlight: 'actually needs.',
+  heroDesc: 'Turn your idea into a working prototype in minutes. Test it, share it, validate it — before spending a single dollar on dev or marketing.',
+  heroBtnPrimary: 'Start free now',
+  heroBtnSecondary: 'See real examples',
+  heroTrust1: 'No credit card',
+  heroTrust2: 'Prototype in 60s',
+  heroTrust3: 'Scalable code',
+
+  // Landing — Pain
+  painLabel: 'The painful truth',
+  painTitle: 'Why 9 out of 10 ideas die',
+  painSubtitle: "The stats don't lie — most projects collapse because they were built before being validated.",
+  painStat1Num: '42%',
+  painStat1Label: 'of startups fail because there was no market need',
+  painStat2Num: '$50K+',
+  painStat2Label: 'average spent before discovering the idea isn\'t wanted',
+  painStat3Num: '6 months',
+  painStat3Label: 'waiting before you learn what the market really thinks',
+  painConclusion: "The answer isn't to build faster — it's to validate before you build.",
+
+  // Landing — How it works
+  howLabel: 'How Capable works',
+  howTitle: 'Three steps from idea to market',
+  step1Num: '01',
+  step1Title: 'Describe your idea, in your words',
+  step1Desc: 'Just write what you want to build. English or Arabic. No coding experience needed.',
+  step2Num: '02',
+  step2Title: 'Capable builds the prototype instantly',
+  step2Desc: 'Advanced AI turns your description into a working, editable web app in seconds.',
+  step3Num: '03',
+  step3Title: 'Test with a real audience',
+  step3Desc: 'Publish with a live link, collect customer feedback, and decide if the idea deserves investment.',
+
+  // Landing — Showcase
+  showcaseLabel: 'Built with Capable',
+  showcaseTitle: 'From idea in your head to a working product',
+  showcaseDesc: 'Hundreds of ideas validated here before becoming real businesses. See some of them and get inspired.',
+  showcaseViewAll: 'Explore all projects',
+  showcasePreview: 'Preview',
+  showcaseFree: 'Free',
+  showcaseTemplateDesc: 'A polished template, ready to remix and launch.',
+
+  // Landing — Comparison
+  comparisonTitle: 'The old way vs the Capable way',
+  comparisonSubtitle: 'Same idea — two completely different outcomes.',
+  comparisonOldLabel: 'Without Capable',
+  comparisonOld1: '6 months of dev, $50K+, an entire team',
+  comparisonOld2: "Discover after launch that the market doesn't want it",
+  comparisonOld3: 'Lose time, money, and morale',
+  comparisonOld4: 'Hard to pivot or change direction',
+  comparisonNewLabel: 'With Capable',
+  comparisonNew1: 'Prototype in 60 seconds, zero cost',
+  comparisonNew2: 'Test with real customers before any investment',
+  comparisonNew3: 'Scale only once demand is proven',
+  comparisonNew4: 'Full flexibility to reshape the idea based on reality',
+
+  // Landing — Features
+  featuresLabel: 'Why Capable',
+  featuresTitle: 'Everything you need to validate your idea',
+  feature1Title: 'AI builds it for you',
+  feature1Desc: 'Describe in English or Arabic, get a full web app with clean code.',
+  feature2Title: 'Scalable code, not toys',
+  feature2Desc: "Not just a mockup — modern code (React, Tailwind) ready to grow when the idea wins.",
+  feature3Title: 'Publish & share instantly',
+  feature3Desc: 'Live link for every project, connect your own domain, and gather feedback from real users.',
+
+  // Landing — Final CTA
+  finalLabel: "Time to start",
+  finalTitle: 'Your idea deserves a chance before dying in a spreadsheet.',
+  finalDesc: 'Start now. No card. No setup. Just an idea and a few seconds between you and your first prototype.',
+  finalBtn: 'Turn my idea into a prototype',
+  finalNote: 'Join hundreds of founders who validate their ideas the smart way',
+
   tryFree: 'Try it for free',
   viewGallery: 'View Gallery',
-
-  feature1Title: 'AI-Powered Generation',
-  feature1Desc: 'Describe what you want, and Capable writes the HTML, CSS, and JS instantly. Iterate seamlessly.',
-  feature2Title: 'Modern Stack',
-  feature2Desc: 'Generates clean, responsive code using Tailwind CSS and standard web technologies.',
-  feature3Title: 'Share & Discover',
-  feature3Desc: 'Publish your creations to the community gallery, or fork and remix projects built by others.',
 
   // Dashboard
   manageProjects: 'Manage your generated interfaces and apps.',

@@ -11,6 +11,10 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import crypto from 'crypto';
 import dns from 'dns/promises';
+import { generateBlueprint, getFallbackBlueprint, GenerationError } from './src/blueprint/generate.js';
+import { BlueprintSchema } from './src/blueprint/schema.js';
+import { activeProviderName } from './src/ai/provider.js';
+import { getUsage, secondsUntilMidnight } from './src/limits.js';
 
 dotenv.config();
 
@@ -82,6 +86,13 @@ async function initDB() {
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS domain_verified BOOLEAN DEFAULT false;
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS domain_verification_token TEXT;
       CREATE INDEX IF NOT EXISTS idx_projects_custom_domain ON projects(custom_domain) WHERE custom_domain IS NOT NULL;
+
+      -- Capable Blueprint v2.0 columns (spec §2.1)
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS blueprint JSONB;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS domain_status TEXT DEFAULT 'none';
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS og_image_url TEXT;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+      CREATE INDEX IF NOT EXISTS idx_projects_published_slug ON projects(published_slug) WHERE published_slug IS NOT NULL;
     `);
     console.log('✅ Database schema initialized');
   } catch (err) {
@@ -235,7 +246,9 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
 app.get('/api/projects', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT id, name, description, thumbnail_url, price, likes, views, is_public, is_published, published_slug, last_edited, created_at FROM projects WHERE user_id = $1 ORDER BY last_edited DESC',
+      `SELECT id, name, description, thumbnail_url, price, likes, views, is_public, is_published,
+              published_slug, last_edited, created_at, (blueprint IS NOT NULL) AS has_blueprint
+         FROM projects WHERE user_id = $1 ORDER BY last_edited DESC`,
       [req.user.id]
     );
     res.json(rows);
@@ -260,9 +273,13 @@ app.get('/api/projects/preview/:id', async (req, res) => {
 app.get('/api/projects/explore', optionalAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT p.id, p.name, p.description, p.thumbnail_url, p.price, p.likes, p.views, p.published_slug, p.last_edited, u.name AS author
+      `SELECT p.id, p.name, p.description, p.thumbnail_url, p.price, p.likes, p.views, p.published_slug, p.last_edited,
+              u.name AS author,
+              p.blueprint->>'project_name_en' AS name_en,
+              p.blueprint->>'project_name_ar' AS name_ar
        FROM projects p LEFT JOIN users u ON p.user_id = u.id
-       WHERE p.is_public = true AND length(p.code) > 0 ORDER BY p.likes DESC, p.created_at DESC LIMIT 50`
+       WHERE p.is_public = true AND (length(COALESCE(p.code, '')) > 0 OR p.blueprint IS NOT NULL)
+       ORDER BY p.likes DESC, p.created_at DESC LIMIT 50`
     );
     res.json(rows);
   } catch (err) {
@@ -496,31 +513,43 @@ app.delete('/api/projects/:id/domain', authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/projects/:id/clone
+// POST /api/projects/:id/clone — deep copy (spec §4.2). Copies the blueprint
+// when present, with a fresh unique slug so the clone is its own live site.
 app.post('/api/projects/:id/clone', authMiddleware, async (req, res) => {
   try {
     const { rows: sourceRows } = await pool.query('SELECT * FROM projects WHERE id = $1 AND (user_id = $2 OR is_public = true)', [req.params.id, req.user.id]);
     const source = sourceRows[0];
     if (!source) return res.status(404).json({ error: 'Project not found' });
 
+    const hasBlueprint = !!source.blueprint;
+    const cloneName = `${source.name} (Clone)`;
+    let newSlug = null;
+    if (hasBlueprint) {
+      const seed = source.blueprint.project_name_en || source.blueprint.project_name || cloneName;
+      newSlug = await uniqueSlug(seed);
+    }
+
     const { rows: newProjRows } = await pool.query(
-      'INSERT INTO projects (user_id, name, description, thumbnail_url, price, code, author, is_public, last_edited) VALUES ($1, $2, $3, $4, $5, $6, $7, false, NOW()) RETURNING id',
-      [req.user.id, `${source.name} (Clone)`, source.description, source.thumbnail_url, 0, source.code, req.user.name]
+      `INSERT INTO projects (user_id, name, description, thumbnail_url, price, code, blueprint,
+                             author, is_public, is_published, published_slug, last_edited, updated_at)
+       VALUES ($1, $2, $3, $4, 0, $5, $6, $7, false, $8, $9, NOW(), NOW()) RETURNING id`,
+      [
+        req.user.id, cloneName, source.description, source.thumbnail_url,
+        source.code, source.blueprint || null, req.user.name,
+        hasBlueprint, newSlug,
+      ]
     );
     const newProjectId = newProjRows[0].id;
 
     const { rows: sourceFiles } = await pool.query('SELECT * FROM project_files WHERE project_id = $1', [source.id]);
-    
-    if (sourceFiles.length > 0) {
-      for (const file of sourceFiles) {
-        await pool.query(
-          'INSERT INTO project_files (project_id, filename, content, file_type) VALUES ($1, $2, $3, $4)',
-          [newProjectId, file.filename, file.content, file.file_type]
-        );
-      }
+    for (const file of sourceFiles) {
+      await pool.query(
+        'INSERT INTO project_files (project_id, filename, content, file_type) VALUES ($1, $2, $3, $4)',
+        [newProjectId, file.filename, file.content, file.file_type]
+      );
     }
 
-    res.status(201).json({ id: newProjectId });
+    res.status(201).json({ id: newProjectId, has_blueprint: hasBlueprint, slug: newSlug });
   } catch (err) {
     res.status(500).json({ error: 'Failed to clone', details: err.message });
   }
@@ -595,7 +624,181 @@ app.delete('/api/projects/:projectId/files/:fileId', authMiddleware, async (req,
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// GENERATE ROUTE
+// BLUEPRINT ROUTES (Capable v2.0 — spec §4)
+// ══════════════════════════════════════════════════════════════════════════════
+
+function slugify(input) {
+  return String(input || '')
+    .toLowerCase()
+    .normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+}
+
+async function uniqueSlug(base) {
+  const root = slugify(base) || 'site';
+  for (let i = 0; i < 6; i++) {
+    const suffix = i === 0 ? '' : `-${Math.random().toString(36).slice(2, 6)}`;
+    const candidate = `${root}${suffix}`;
+    const { rows } = await pool.query('SELECT 1 FROM projects WHERE published_slug = $1 LIMIT 1', [candidate]);
+    if (rows.length === 0) return candidate;
+  }
+  return `${root}-${Date.now().toString(36)}`;
+}
+
+// POST /api/blueprint/generate — generate a Blueprint and persist as a project
+app.post('/api/blueprint/generate', authMiddleware, async (req, res) => {
+  const { prompt, language = 'ar', project_id } = req.body || {};
+  if (!prompt || typeof prompt !== 'string') return res.status(400).json({ error: 'prompt is required' });
+  if (prompt.length > 500) return res.status(400).json({ error: 'prompt too long (max 500 chars)' });
+
+  try {
+    const { rows: userRows } = await pool.query('SELECT plan, tokens_used, tokens_limit FROM users WHERE id = $1', [req.user.id]);
+    const user = userRows[0];
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Tier rate limiting (spec §6)
+    const quota = await getUsage(pool, req.user.id, user.plan);
+    if (quota.generations_today >= quota.generations_limit) {
+      res.set('Retry-After', String(secondsUntilMidnight()));
+      return res.status(429).json({
+        error: 'Daily generation limit reached',
+        reason: 'generations',
+        ...quota,
+        upgrade_required: user.plan === 'free',
+      });
+    }
+    if (!project_id && quota.projects_limit != null && quota.projects_count >= quota.projects_limit) {
+      return res.status(429).json({
+        error: 'Project limit reached',
+        reason: 'projects',
+        ...quota,
+        upgrade_required: user.plan === 'free',
+      });
+    }
+
+    let blueprint, usage;
+    try {
+      const out = await generateBlueprint({ prompt, language });
+      blueprint = out.blueprint;
+      usage = out.usage;
+    } catch (err) {
+      if (err instanceof GenerationError) {
+        return res.status(422).json({ error: 'Blueprint validation failed after retries', details: err.details });
+      }
+      throw err;
+    }
+
+    const projectName = blueprint.project_name;
+    // Prefer the English name for the slug so Arabic sites get clean Latin URLs.
+    const slugSeed = blueprint.project_name_en || blueprint.project_name;
+    let projectIdOut = project_id;
+    let slug;
+
+    if (project_id) {
+      const { rows } = await pool.query('SELECT id, published_slug FROM projects WHERE id = $1 AND user_id = $2', [project_id, req.user.id]);
+      if (rows.length === 0) return res.status(404).json({ error: 'Project not found' });
+      slug = rows[0].published_slug || await uniqueSlug(slugSeed);
+      await pool.query(
+        `UPDATE projects SET name = $1, blueprint = $2, published_slug = $3,
+         is_published = true, is_public = true, last_edited = NOW(), updated_at = NOW()
+         WHERE id = $4`,
+        [projectName, blueprint, slug, project_id]
+      );
+    } else {
+      slug = await uniqueSlug(slugSeed);
+      const { rows } = await pool.query(
+        `INSERT INTO projects (user_id, name, blueprint, published_slug, author, is_public, is_published, last_edited, updated_at)
+         VALUES ($1, $2, $3, $4, $5, true, true, NOW(), NOW()) RETURNING id`,
+        [req.user.id, projectName, blueprint, slug, req.user.name]
+      );
+      projectIdOut = rows[0].id;
+    }
+
+    const total = (usage?.tokens_in || 0) + (usage?.tokens_out || 0);
+    await pool.query('UPDATE users SET tokens_used = tokens_used + $1 WHERE id = $2', [total, req.user.id]);
+    await pool.query(
+      'INSERT INTO token_usage (user_id, project_id, tokens_in, tokens_out, model, action) VALUES ($1, $2, $3, $4, $5, $6)',
+      [req.user.id, projectIdOut, usage?.tokens_in || 0, usage?.tokens_out || 0, usage?.model || 'unknown', 'blueprint_generate']
+    );
+
+    const appDomain = process.env.NEXT_PUBLIC_APP_DOMAIN || 'capable.app';
+    res.json({
+      project_id: projectIdOut,
+      slug,
+      url: `https://${slug}.${appDomain}`,
+      blueprint,
+      provider: usage?.model,
+      attempts: usage?.attempts,
+    });
+  } catch (err) {
+    console.error('Blueprint generation error:', err);
+    res.status(500).json({ error: 'Generation failed', details: err.message });
+  }
+});
+
+// PATCH /api/blueprint/:id — replace a project's blueprint (re-validated)
+app.patch('/api/blueprint/:id', authMiddleware, async (req, res) => {
+  try {
+    const { blueprint } = req.body || {};
+    if (!blueprint) return res.status(400).json({ error: 'blueprint is required' });
+
+    const parsed = BlueprintSchema.safeParse(blueprint);
+    if (!parsed.success) {
+      return res.status(422).json({ error: 'Invalid blueprint', issues: parsed.error.issues });
+    }
+
+    const { rows } = await pool.query('SELECT id FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Project not found' });
+
+    await pool.query(
+      'UPDATE projects SET blueprint = $1, name = $2, last_edited = NOW(), updated_at = NOW() WHERE id = $3',
+      [parsed.data, parsed.data.project_name, req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// GET /api/render/:slug — public endpoint consumed by the Next.js renderer (SSR/ISR)
+app.get('/api/render/:slug', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, blueprint, og_image_url, custom_domain, domain_status, updated_at
+         FROM projects WHERE published_slug = $1 AND is_published = true AND blueprint IS NOT NULL LIMIT 1`,
+      [req.params.slug]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// GET /api/blueprint/quota — current tier usage for the dashboard
+app.get('/api/blueprint/quota', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT plan FROM users WHERE id = $1', [req.user.id]);
+    res.json(await getUsage(pool, req.user.id, rows[0]?.plan));
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// GET /api/blueprint/health — quick sanity check for the AI provider config
+app.get('/api/blueprint/health', (req, res) => {
+  res.json({
+    provider: activeProviderName(),
+    groq_keyed: !!process.env.GROQ_API_KEY,
+    gemini_keyed: !!process.env.GEMINI_API_KEY,
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LEGACY GENERATE ROUTE (HTML output — kept for existing editor)
 // ══════════════════════════════════════════════════════════════════════════════
 
 app.post('/api/generate', authMiddleware, async (req, res) => {

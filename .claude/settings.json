@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(node --check server.js)",
+      "Bash(node -e \"import\\('./src/blueprint/schema.js'\\).then\\(m => { const r = m.BlueprintSchema.safeParse\\(m.getFallbackBlueprint\\('Test Site', 'en'\\)\\); console.log\\('fallback valid:', r.success\\); if\\(!r.success\\) console.log\\(r.error.issues\\); }\\)\")",
+      "Bash(CAPABLE_API_URL=http://localhost:5000 NEXT_PUBLIC_APP_DOMAIN=capable.app npm run start)",
+      "Bash(tee /tmp/renderer.log)",
+      "Bash(node -e ' *)",
+      "Bash(npx next *)",
+      "Bash(curl -s -H \"Host: site-5f2e.capable.app\" http://localhost:3007/ -o /tmp/s5f2e.html)",
+      "Read(//tmp/**)",
+      "Bash(node -e \"import\\('./src/blueprint/schema.js'\\).then\\(m=>{const r=m.BlueprintSchema.safeParse\\(m.getFallbackBlueprint\\('Test','ar'\\)\\);console.log\\('fallback valid:',r.success\\);if\\(!r.success\\)console.log\\(r.error.issues\\)}\\)\")",
+      "Bash(curl -s http://localhost:5000/api/projects/explore)",
+      "Bash(node -e \"let s='';process.stdin.on\\('data',c=>s+=c\\).on\\('end',\\(\\)=>{const a=JSON.parse\\(s\\);const withNames=a.filter\\(p=>p.name_en||p.name_ar\\);console.log\\('blueprint projects with bilingual names:',withNames.length\\);withNames.forEach\\(p=>console.log\\('  -',p.name,'| en:',p.name_en,'| ar:',p.name_ar\\)\\);}\\)\")",
+      "Bash(curl -s http://localhost:3007/shine-dubai -o /tmp/sd.html)",
+      "PowerShell(Get-NetTCPConnection -State Listen -LocalPort 5000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { try { Stop-Process -Id $_ -Force -ErrorAction Stop } catch {} }; \"stopped old backend\")",
+      "Bash(node --dns-result-order=ipv4first server.js)",
+      "Bash(curl -s -m 2 -o /dev/null http://localhost:5000/api/blueprint/health)",
+      "Bash(curl -s http://localhost:5000/api/blueprint/health)",
+      "Bash(curl -s -X POST http://localhost:5000/api/blueprint/generate -H 'Content-Type: application/json' -H 'Authorization: Bearer __TRACKED_VAR__' -d '{\"prompt\":\"عيادة أسنان حديثة في الرياض مع حجز مواعيد\",\"language\":\"ar\"}')"
+    ]
+  }
+}

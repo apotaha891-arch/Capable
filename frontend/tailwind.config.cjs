@@ -1,4 +1,5 @@
 module.exports = {
+  darkMode: 'class',
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
@@ -6,7 +7,37 @@ module.exports = {
     "./frontend/src/**/*.{js,ts,jsx,tsx}"
   ],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        // Capable Brand Kit
+        capable: {
+          navy:    '#1F4788',  // primary
+          medium:  '#2E5FA3',  // secondary
+          light:   '#4A7BC8',  // accents, links
+          success: '#10D981',
+          warning: '#F59E0B',
+          error:   '#EF4444',
+          text:    '#1F2937',  // body text
+          muted:   '#6B7280',  // secondary text
+          surface: '#F3F4F6',  // light bg
+        },
+      },
+      fontFamily: {
+        sans: ['Arial', 'Helvetica', 'sans-serif'],
+      },
+      borderRadius: {
+        brand: '8px',
+      },
+      spacing: {
+        // 8px base grid helpers
+        '18': '4.5rem',
+      },
+      boxShadow: {
+        'brand-sm':  '0 1px 2px rgba(31, 71, 136, 0.06)',
+        'brand':     '0 4px 12px rgba(31, 71, 136, 0.08)',
+        'brand-lg':  '0 10px 30px rgba(31, 71, 136, 0.12)',
+      },
+    },
   },
   plugins: [],
 }

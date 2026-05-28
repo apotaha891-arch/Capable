@@ -1,26 +1,94 @@
-@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700;800&display=swap');
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --font-sans: 'Inter', sans-serif;
+    /* Capable brand tokens — light mode */
+    --capable-navy: #1F4788;
+    --capable-medium: #2E5FA3;
+    --capable-light: #4A7BC8;
+    --capable-success: #10D981;
+    --capable-warning: #F59E0B;
+    --capable-error: #EF4444;
+    --capable-text: #1F2937;
+    --capable-muted: #6B7280;
+    --capable-surface: #F3F4F6;
+
+    --font-sans: Arial, Helvetica, sans-serif;
   }
 
-  /* Arabic mode */
-  [dir="rtl"] {
-    --font-sans: 'Cairo', sans-serif;
-    font-family: 'Cairo', sans-serif;
+  html.dark {
+    /* Dark mode overrides — keep brand identity, shift surfaces */
+    --capable-text: #E2E8F0;
+    --capable-muted: #94A3B8;
+    --capable-surface: #0F172A;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   body {
     font-family: var(--font-sans);
+    color: var(--capable-text);
+    background: #FFFFFF;
+    line-height: 1.6;
   }
 
-  /* Smooth RTL transition */
-  html {
-    transition: direction 0.1s;
+  html.dark body {
+    background: #020617; /* slate-950 */
+  }
+
+  /* Headings — base colors set per mode below */
+  h1 { font-size: 2.25rem; font-weight: 700; line-height: 1.2; color: var(--capable-navy); }
+  h2 { font-size: 1.75rem; font-weight: 700; line-height: 1.2; color: var(--capable-medium); }
+  h3 { font-size: 1.5rem;  font-weight: 700; line-height: 1.2; color: var(--capable-light); }
+
+  html.dark h1 { color: #FFFFFF; }
+  html.dark h2 { color: #E2E8F0; }
+  html.dark h3 { color: #93C5FD; }
+
+  /* Brand link */
+  a.brand-link {
+    color: var(--capable-light);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  a.brand-link:hover { color: var(--capable-medium); }
+  html.dark a.brand-link { color: #93C5FD; }
+  html.dark a.brand-link:hover { color: #BFDBFE; }
+
+  ::selection {
+    background: rgba(31, 71, 136, 0.15);
+    color: var(--capable-navy);
+  }
+  html.dark ::selection {
+    background: rgba(99, 102, 241, 0.4);
+    color: #FFFFFF;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 bg-capable-navy text-white font-bold rounded-brand px-6 py-3 transition-colors hover:bg-capable-medium focus:outline-none focus:ring-2 focus:ring-capable-light focus:ring-offset-2
+           dark:bg-indigo-600 dark:hover:bg-indigo-500 dark:ring-offset-slate-950;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 bg-white text-capable-navy font-bold rounded-brand px-6 py-3 border border-capable-light transition-colors hover:bg-capable-surface focus:outline-none focus:ring-2 focus:ring-capable-light focus:ring-offset-2
+           dark:bg-slate-900 dark:text-slate-100 dark:border-slate-700 dark:hover:bg-slate-800 dark:ring-offset-slate-950;
+  }
+
+  .btn-text {
+    @apply inline-flex items-center gap-1.5 text-capable-navy font-semibold px-3 py-2 rounded-brand transition-colors hover:bg-capable-surface
+           dark:text-indigo-300 dark:hover:bg-slate-800;
+  }
+
+  .brand-card {
+    @apply bg-white border border-gray-200 rounded-brand shadow-brand-sm
+           dark:bg-slate-900/60 dark:border-slate-800 dark:shadow-none;
   }
 }

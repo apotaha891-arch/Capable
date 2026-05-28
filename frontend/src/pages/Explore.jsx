@@ -36,7 +36,7 @@ export default function Explore() {
       });
       if (!response.ok) throw new Error('Failed');
       const newProject = await response.json();
-      navigate(`/editor/${newProject.id}`);
+      navigate(newProject.has_blueprint ? `/blueprint/${newProject.id}` : `/editor/${newProject.id}`);
     } catch (err) {
       console.error('Failed to clone:', err);
     }
@@ -121,7 +121,14 @@ export default function Explore() {
 
                 <div className="p-5 flex flex-col justify-between" style={{ minHeight: '140px' }}>
                   <div>
-                    <h3 className="text-base font-bold text-white mb-1 truncate">{project.name}</h3>
+                    <h3 className="text-base font-bold text-white mb-0.5 truncate">{project.name}</h3>
+                    {(() => {
+                      const isArabic = /[؀-ۿ]/.test(project.name || '');
+                      const alt = isArabic ? project.name_en : project.name_ar;
+                      return alt && alt !== project.name ? (
+                        <p className="text-xs text-slate-400 mb-1 truncate" dir={isArabic ? 'ltr' : 'rtl'}>{alt}</p>
+                      ) : null;
+                    })()}
                     <p className="text-xs text-slate-500 mb-3 truncate">
                       by <span className="text-indigo-400">{project.author || 'Anonymous'}</span>
                     </p>

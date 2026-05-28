@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary: #1e40af;
+  --secondary: #f59e0b;
+  --radius: 0.5rem;
+}
+
+html, body { height: 100%; }
+body { font-family: var(--font-site), system-ui, sans-serif; }
+
+[dir="rtl"] { text-align: right; }

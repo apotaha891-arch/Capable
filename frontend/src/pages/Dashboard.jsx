@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Sparkles, Plus, Trash2, FolderOpen, Globe, Share2, Zap, LogOut, Settings, ArrowUpRight, Compass } from 'lucide-react';
+import { Sparkles, Plus, Trash2, FolderOpen, Globe, Share2, Zap, LogOut, Settings, ArrowUpRight, Compass, Wand2, MessageCircle, Link2, Check } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
 import NewProjectModal from '../components/NewProjectModal.jsx';
+import { siteUrl, whatsappShareUrl, shareSite } from '../utils/site.js';
 
 const PLAN_COLORS = { free: 'text-slate-400', pro: 'text-indigo-400', enterprise: 'text-amber-400' };
 const PLAN_LABELS = { free: 'Free', pro: 'Pro', enterprise: 'Enterprise' };
@@ -13,6 +14,7 @@ export default function Dashboard() {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [usage, setUsage] = useState(null);
+  const [quota, setQuota] = useState(null);
   const [showNewModal, setShowNewModal] = useState(false);
   const { t, lang } = useLang();
   const { user, logout, authFetch } = useAuth();
@@ -21,7 +23,8 @@ export default function Dashboard() {
     Promise.all([
       authFetch('/api/projects').then(r => r.json()),
       authFetch('/api/usage').then(r => r.json()),
-    ]).then(([p, u]) => { setProjects(p); setUsage(u); setLoading(false); })
+      authFetch('/api/blueprint/quota').then(r => r.json()).catch(() => null),
+    ]).then(([p, u, q]) => { setProjects(p); setUsage(u); setQuota(q); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
 
@@ -109,6 +112,29 @@ export default function Dashboard() {
             </div>
           )}
 
+          {/* Quota card (tier limits) */}
+          {quota && (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+              <QuotaBar
+                label={lang === 'ar' ? 'توليدات اليوم' : 'Generations today'}
+                used={quota.generations_today}
+                limit={quota.generations_limit}
+                lang={lang}
+              />
+              <QuotaBar
+                label={lang === 'ar' ? 'المشاريع' : 'Projects'}
+                used={quota.projects_count}
+                limit={quota.projects_limit}
+                lang={lang}
+              />
+              {quota.plan === 'free' && (
+                <button className="w-full bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded-lg py-2 text-xs font-medium flex items-center justify-center gap-1.5">
+                  <ArrowUpRight size={13} /> {lang === 'ar' ? 'الترقية إلى Pro' : 'Upgrade to Pro'}
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Stats card */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 grid grid-cols-2 gap-3">
             <div>
@@ -189,12 +215,45 @@ export default function Dashboard() {
   );
 }
 
+function QuotaBar({ label, used, limit, lang }) {
+  const unlimited = limit == null;
+  const pct = unlimited ? 0 : Math.min(100, Math.round((used / limit) * 100));
+  const color = pct >= 100 ? 'bg-red-500' : pct >= 70 ? 'bg-amber-500' : 'bg-indigo-500';
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2 text-sm">
+        <span className="flex items-center gap-1.5 font-medium text-white"><Wand2 size={14} className="text-indigo-400" />{label}</span>
+        <span className="text-xs text-slate-400" dir="ltr">{used}{unlimited ? '' : ` / ${limit}`}{unlimited ? ` (${lang === 'ar' ? 'غير محدود' : 'unlimited'})` : ''}</span>
+      </div>
+      {!unlimited && (
+        <div className="w-full bg-slate-800 rounded-full h-1.5">
+          <div className={`h-1.5 rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
   const hasThumb = !!project.thumbnail_url;
+  const editPath = project.has_blueprint ? `/blueprint/${project.id}` : `/editor/${project.id}`;
+  const liveUrl = project.has_blueprint
+    ? siteUrl(project.published_slug)
+    : `http://localhost:5000/hosted/${project.published_slug}/index.html`;
+  const [copied, setCopied] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+
+  const onShare = async () => {
+    const action = await shareSite(project.name, project.published_slug);
+    if (action === 'copied') { setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    else if (action === 'shared') { /* native sheet handled it */ }
+    else setShareOpen(o => !o); // no native share + copy failed → show fallback menu
+  };
+
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden group hover:border-indigo-500/40 transition-all hover:shadow-lg hover:shadow-indigo-500/10 flex flex-col">
       {/* Thumbnail */}
-      <Link to={`/editor/${project.id}`} className="block relative aspect-video bg-slate-950 overflow-hidden border-b border-slate-800">
+      <Link to={editPath} className="block relative aspect-video bg-slate-950 overflow-hidden border-b border-slate-800">
         {hasThumb ? (
           <img src={project.thumbnail_url} alt={project.name} className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform" />
         ) : (
@@ -213,7 +272,7 @@ function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
 
       {/* Body */}
       <div className="p-3 flex flex-col flex-1">
-        <Link to={`/editor/${project.id}`} className="text-sm font-semibold text-white mb-1 truncate group-hover:text-indigo-400 transition-colors">
+        <Link to={editPath} className="text-sm font-semibold text-white mb-1 truncate group-hover:text-indigo-400 transition-colors">
           {project.name}
         </Link>
         <p className="text-xs text-slate-500 mb-3 line-clamp-2 min-h-[2rem]">
@@ -223,14 +282,14 @@ function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
         {/* Actions row */}
         <div className="flex items-center gap-1.5 mt-auto">
           <Link
-            to={`/editor/${project.id}`}
+            to={editPath}
             className="flex-1 bg-slate-800 hover:bg-indigo-600 text-white text-center py-1.5 rounded-lg text-xs font-medium transition-colors"
           >
             {t('edit')}
           </Link>
           {project.is_published ? (
             <a
-              href={`http://localhost:5000/hosted/${project.published_slug}/index.html`}
+              href={liveUrl}
               target="_blank" rel="noreferrer"
               title={lang === 'ar' ? 'عرض المنشور' : 'View live'}
               className="border border-emerald-700/40 hover:bg-emerald-600 hover:text-white text-emerald-400 rounded-lg p-1.5 transition-colors"
@@ -247,12 +306,41 @@ function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
             </button>
           )}
           {project.is_published && (
+            <div className="relative">
+              <button
+                onClick={onShare}
+                title={lang === 'ar' ? 'مشاركة' : 'Share'}
+                className="border border-slate-700 hover:border-indigo-500 hover:text-indigo-400 text-slate-400 rounded-lg p-1.5 transition-colors"
+              >
+                {copied ? <Check size={13} className="text-emerald-400" /> : <Share2 size={13} />}
+              </button>
+              {shareOpen && (
+                <div className="absolute end-0 bottom-full mb-1 z-20 w-40 bg-slate-800 border border-slate-700 rounded-lg p-1 shadow-xl">
+                  <a
+                    href={whatsappShareUrl(project.name, project.published_slug)}
+                    target="_blank" rel="noreferrer"
+                    onClick={() => setShareOpen(false)}
+                    className="flex items-center gap-2 px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-700 rounded"
+                  >
+                    <MessageCircle size={13} className="text-green-400" /> WhatsApp
+                  </a>
+                  <button
+                    onClick={async () => { await navigator.clipboard.writeText(siteUrl(project.published_slug)); setCopied(true); setShareOpen(false); setTimeout(() => setCopied(false), 1500); }}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-700 rounded"
+                  >
+                    <Link2 size={13} /> {lang === 'ar' ? 'نسخ الرابط' : 'Copy link'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          {project.is_published && (
             <button
               onClick={onUnpublish}
               title={lang === 'ar' ? 'إلغاء النشر' : 'Unpublish'}
               className="border border-slate-700 hover:border-amber-500 hover:text-amber-400 text-slate-400 rounded-lg p-1.5 transition-colors"
             >
-              <Share2 size={13} />
+              <Globe size={13} className="opacity-60" />
             </button>
           )}
           <button
