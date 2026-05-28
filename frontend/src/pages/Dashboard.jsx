@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Sparkles, Plus, Trash2, FolderOpen, Globe, Share2, Zap, LogOut, Settings, ArrowUpRight, Compass, Wand2, MessageCircle, Link2, Check } from 'lucide-react';
+import { Sparkles, Plus, Trash2, FolderOpen, Globe, Share2, Zap, LogOut, Settings, ArrowUpRight, Compass, Wand2, MessageCircle, Link2, Check, Users, ChevronRight } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
@@ -9,6 +9,81 @@ import { siteUrl, whatsappShareUrl, shareSite } from '../utils/site.js';
 
 const PLAN_COLORS = { free: 'text-slate-400', pro: 'text-indigo-400', enterprise: 'text-amber-400' };
 const PLAN_LABELS = { free: 'Free', pro: 'Pro', enterprise: 'Enterprise' };
+
+function AIPowerBar({ used, limit, lang, t }) {
+  const pct = Math.round((used / limit) * 100);
+  const segments = 10;
+  const filledSegments = Math.round((pct / 100) * segments);
+
+  let statusLabel, statusColor, barColor;
+  if (pct < 50) {
+    statusLabel = t('creditsFull');
+    statusColor = 'text-emerald-400';
+    barColor = 'bg-emerald-500';
+  } else if (pct < 75) {
+    statusLabel = t('creditsGood');
+    statusColor = 'text-indigo-400';
+    barColor = 'bg-indigo-500';
+  } else if (pct < 90) {
+    statusLabel = t('creditsLow');
+    statusColor = 'text-amber-400';
+    barColor = 'bg-amber-500';
+  } else {
+    statusLabel = t('creditsCritical');
+    statusColor = 'text-red-400';
+    barColor = 'bg-red-500';
+  }
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-1.5 text-sm font-medium text-white">
+          <Zap size={14} className="text-indigo-400" />
+          {t('aiCredits')}
+        </div>
+        <span className={`text-xs font-bold ${statusColor}`}>{statusLabel}</span>
+      </div>
+
+      {/* Segmented power bar */}
+      <div className="flex gap-1 mb-3">
+        {Array.from({ length: segments }).map((_, i) => (
+          <div
+            key={i}
+            className={`flex-1 h-2 rounded-sm transition-all ${i < filledSegments ? barColor : 'bg-slate-800'}`}
+          />
+        ))}
+      </div>
+
+      <p className="text-xs text-slate-500 mb-1">{t('aiCreditsDesc')}</p>
+
+      {pct >= 75 && (
+        <button className="mt-3 w-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg py-2 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors">
+          <ArrowUpRight size={13} /> {t('upgradeForMore')}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ConsultingCard({ lang, t }) {
+  return (
+    <div className="bg-gradient-to-br from-indigo-900/40 to-purple-900/30 border border-indigo-700/40 rounded-2xl p-5">
+      <div className="flex items-center gap-2 mb-2">
+        <div className="w-8 h-8 bg-indigo-500/20 rounded-xl flex items-center justify-center">
+          <Users size={15} className="text-indigo-300" />
+        </div>
+        <span className="text-sm font-bold text-white">{t('consultTitle')}</span>
+      </div>
+      <p className="text-xs text-slate-400 mb-3 leading-relaxed">{t('consultDesc')}</p>
+      <a
+        href="mailto:hello@capable.app?subject=Expert%20Help%20Request"
+        className="w-full bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg py-2 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+      >
+        {t('consultCta')} <ChevronRight size={12} />
+      </a>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const [projects, setProjects] = useState([]);
@@ -48,7 +123,6 @@ export default function Dashboard() {
     setProjects(prev => prev.map(p => p.id === id ? { ...p, is_published: false } : p));
   };
 
-  const tokenPct = usage ? Math.round((usage.tokens_used / usage.tokens_limit) * 100) : 0;
   const publishedCount = projects.filter(p => p.is_published).length;
 
   return (
@@ -85,31 +159,14 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Usage card */}
+          {/* AI Power Bar */}
           {usage && (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-1.5 text-sm font-medium text-white">
-                  <Zap size={14} className="text-indigo-400" />
-                  {lang === 'ar' ? 'استهلاك التوكن' : 'Token Usage'}
-                </div>
-                <span className={`text-xs font-bold ${tokenPct >= 90 ? 'text-red-400' : tokenPct >= 70 ? 'text-amber-400' : 'text-emerald-400'}`}>{tokenPct}%</span>
-              </div>
-              <div className="w-full bg-slate-800 rounded-full h-1.5 mb-2">
-                <div
-                  className={`h-1.5 rounded-full transition-all ${tokenPct >= 90 ? 'bg-red-500' : tokenPct >= 70 ? 'bg-amber-500' : 'bg-indigo-500'}`}
-                  style={{ width: `${Math.min(tokenPct, 100)}%` }}
-                />
-              </div>
-              <div className="text-xs text-slate-500">
-                {usage.tokens_used.toLocaleString()} / {usage.tokens_limit.toLocaleString()}
-              </div>
-              {tokenPct >= 80 && (
-                <button className="mt-3 w-full bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg py-2 text-xs font-medium flex items-center justify-center gap-1.5">
-                  <ArrowUpRight size={13} /> {lang === 'ar' ? 'ترقية' : 'Upgrade'}
-                </button>
-              )}
-            </div>
+            <AIPowerBar
+              used={usage.tokens_used}
+              limit={usage.tokens_limit}
+              lang={lang}
+              t={t}
+            />
           )}
 
           {/* Quota card (tier limits) */}
@@ -143,14 +200,17 @@ export default function Dashboard() {
             </div>
             <div>
               <div className="text-2xl font-bold text-emerald-400">{publishedCount}</div>
-              <div className="text-xs text-slate-500">{lang === 'ar' ? 'منشورة' : 'Published'}</div>
+              <div className="text-xs text-slate-500">{lang === 'ar' ? 'منشورة' : 'Live'}</div>
             </div>
           </div>
+
+          {/* Consulting CTA */}
+          <ConsultingCard lang={lang} t={t} />
 
           {/* Actions */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-2">
             <Link to="/explore" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
-              <Compass size={14} /> {lang === 'ar' ? 'استكشف' : 'Explore'}
+              <Compass size={14} /> {lang === 'ar' ? 'استكشف القوالب' : 'Browse Templates'}
             </Link>
             <button className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
               <Settings size={14} /> {lang === 'ar' ? 'الإعدادات' : 'Settings'}
@@ -185,12 +245,20 @@ export default function Dashboard() {
               <FolderOpen size={40} className="text-slate-600 mb-3" />
               <p className="text-slate-300 font-semibold">{t('noProjects')}</p>
               <p className="text-sm text-slate-500 mb-5">{t('noProjectsDesc')}</p>
-              <button
-                onClick={() => setShowNewModal(true)}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-sm font-medium flex items-center gap-1.5"
-              >
-                <Plus size={14} /> {t('newProject')}
-              </button>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowNewModal(true)}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-sm font-medium flex items-center gap-1.5"
+                >
+                  <Plus size={14} /> {t('newProject')}
+                </button>
+                <Link
+                  to="/explore"
+                  className="bg-slate-800 hover:bg-slate-700 text-white px-5 py-2 rounded-xl text-sm font-medium flex items-center gap-1.5"
+                >
+                  <Compass size={14} /> {lang === 'ar' ? 'استكشف القوالب' : 'Browse Templates'}
+                </Link>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">

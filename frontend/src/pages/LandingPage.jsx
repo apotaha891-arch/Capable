@@ -4,6 +4,7 @@ import {
   Sparkles, ArrowRight, Eye, Rocket, Target,
   AlertTriangle, CheckCircle2, X, Clock, TrendingDown,
   TrendingUp, MessageSquare, Code2, Wand2, Share2, Globe,
+  Check, Users,
 } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
@@ -57,6 +58,142 @@ function SectionLabel({ children, tone = 'navy' }) {
     <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full border text-xs font-semibold uppercase tracking-wider ${tones[tone]}`}>
       {children}
     </span>
+  );
+}
+
+function PricingSection({ t, isRTL }) {
+  const freeFeatures = isRTL ? [
+    'أرصدة تصميم ذكي للبدء',
+    'نشر مجاني مع رابط قابل للمشاركة',
+    'وصول كامل لمعرض القوالب',
+    'استنساخ أي قالب مجاني',
+    'تعديل نصوص وألوان غير محدود',
+  ] : [
+    'AI Design Credits to get started',
+    'Free publishing with shareable link',
+    'Full access to template gallery',
+    'Clone any free template',
+    'Unlimited text & color edits',
+  ];
+
+  const proFeatures = isRTL ? [
+    'أرصدة تصميم ذكي بكميات أكبر',
+    'نشر بنقرة واحدة + SSL مجاني',
+    'دومين مخصص مع إعداد سحري',
+    'أولوية في دعم العملاء',
+    'كل ميزات الخطة المجانية',
+  ] : [
+    '10× more AI Design Credits',
+    'One-click publishing + free SSL',
+    'Custom domain with guided setup',
+    'Priority customer support',
+    'Everything in Free',
+  ];
+
+  const consultFeatures = isRTL ? [
+    'مهندس كيبل متخصص مخصص لك',
+    'تكاملات API مخصصة',
+    'منطق دفع وتسعير معقد',
+    'ميزات تصميم متقدمة',
+    'تسليم في 1–3 أيام عمل',
+  ] : [
+    'Dedicated Capable engineer',
+    'Custom API integrations',
+    'Complex payment & pricing logic',
+    'Advanced design features',
+    'Delivered in 1–3 business days',
+  ];
+
+  return (
+    <section className="relative z-10 bg-capable-surface dark:bg-transparent border-b border-gray-100 dark:border-slate-800/60">
+      <div className="max-w-6xl mx-auto px-6 md:px-8 py-20 md:py-24">
+        <div className="max-w-3xl mx-auto text-center mb-12">
+          <Reveal><h2 className="mb-3">{t('pricingTitle')}</h2></Reveal>
+          <Reveal delay={80}>
+            <p className="text-capable-muted dark:text-slate-400 text-base md:text-lg">{t('pricingSubtitle')}</p>
+          </Reveal>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
+          {/* Free */}
+          <Reveal>
+            <div className="brand-card p-8 h-full flex flex-col">
+              <div className="mb-6">
+                <div className="text-sm font-semibold text-capable-muted dark:text-slate-400 uppercase tracking-wider mb-2">{t('planFreeTitle')}</div>
+                <div className="text-4xl font-extrabold text-capable-navy dark:text-white mb-1">{t('planFreePrice')}</div>
+                <p className="text-sm text-capable-muted dark:text-slate-500">{t('planFreeDesc')}</p>
+              </div>
+              <ul className="space-y-3 mb-8 flex-1">
+                {freeFeatures.map((f, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-capable-text dark:text-slate-300">
+                    <Check size={15} className="text-capable-success mt-0.5 shrink-0" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+              <Link to="/editor" className="w-full bg-capable-surface dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-capable-navy dark:text-white py-3 rounded-brand text-sm font-semibold text-center transition-colors border border-gray-200 dark:border-slate-700">
+                {t('planFreeBadge')}
+              </Link>
+            </div>
+          </Reveal>
+
+          {/* Pro — highlighted */}
+          <Reveal delay={100}>
+            <div className="relative rounded-brand p-8 h-full flex flex-col bg-capable-navy dark:bg-gradient-to-b dark:from-indigo-900/60 dark:to-slate-900 text-white shadow-brand-lg dark:shadow-2xl dark:shadow-indigo-500/20 dark:border dark:border-indigo-500/50">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+                <span className="bg-capable-light dark:bg-indigo-600 text-white text-xs font-bold px-4 py-1 rounded-full">
+                  {isRTL ? 'الأكثر شيوعاً' : 'Most Popular'}
+                </span>
+              </div>
+              <div className="mb-6">
+                <div className="text-sm font-semibold text-white/70 dark:text-indigo-300 uppercase tracking-wider mb-2">{t('planProTitle')}</div>
+                <div className="flex items-end gap-1 mb-1">
+                  <span className="text-4xl font-extrabold text-white">{t('planProPrice')}</span>
+                  <span className="text-white/70 text-sm mb-1">{t('planProPer')}</span>
+                </div>
+                <p className="text-sm text-white/70">{t('planProDesc')}</p>
+              </div>
+              <ul className="space-y-3 mb-8 flex-1">
+                {proFeatures.map((f, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-white/90">
+                    <Check size={15} className="text-capable-success mt-0.5 shrink-0" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+              <Link to="/editor" className="w-full bg-white text-capable-navy dark:bg-indigo-600 dark:text-white hover:bg-capable-surface dark:hover:bg-indigo-500 py-3 rounded-brand text-sm font-bold text-center transition-all">
+                {t('planProBadge')}
+              </Link>
+            </div>
+          </Reveal>
+
+          {/* Expert / Consulting */}
+          <Reveal delay={200}>
+            <div className="brand-card p-8 h-full flex flex-col">
+              <div className="mb-6">
+                <div className="w-10 h-10 rounded-brand bg-capable-navy/10 dark:bg-purple-500/20 text-capable-navy dark:text-purple-300 flex items-center justify-center mb-4">
+                  <Users size={20} />
+                </div>
+                <div className="text-sm font-semibold text-capable-muted dark:text-purple-300 uppercase tracking-wider mb-2">{t('planConsultTitle')}</div>
+                <div className="text-2xl font-extrabold text-capable-navy dark:text-white mb-1">{t('planConsultPrice')}</div>
+                <p className="text-sm text-capable-muted dark:text-slate-400">{t('planConsultDesc')}</p>
+              </div>
+              <ul className="space-y-3 mb-8 flex-1">
+                {consultFeatures.map((f, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-capable-text dark:text-slate-300">
+                    <Check size={15} className="text-capable-navy dark:text-purple-400 mt-0.5 shrink-0" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+              <a href="mailto:hello@capable.app?subject=Expert%20Help%20Request" className="w-full bg-capable-navy/90 dark:bg-purple-700 hover:bg-capable-navy dark:hover:bg-purple-600 text-white py-3 rounded-brand text-sm font-semibold text-center transition-colors">
+                {t('planConsultBadge')}
+              </a>
+            </div>
+          </Reveal>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -427,6 +564,9 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      {/* ───────────── PRICING ───────────── */}
+      <PricingSection t={t} isRTL={isRTL} />
 
       {/* ───────────── FINAL CTA ───────────── */}
       <section className="relative z-10 bg-capable-navy dark:bg-transparent">
