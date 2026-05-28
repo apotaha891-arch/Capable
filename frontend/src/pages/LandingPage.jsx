@@ -1,10 +1,149 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Sparkles, Zap, Layers, Globe, ArrowRight, Eye } from 'lucide-react';
+import { Sparkles, Zap, Layers, Globe, ArrowRight, Eye, Check, Users, Copy } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
 
 const API = 'http://localhost:5000';
+
+function PricingSection({ t, lang }) {
+  const freeFeatures = lang === 'ar' ? [
+    'أرصدة تصميم ذكي للبدء',
+    'نشر مجاني مع رابط قابل للمشاركة',
+    'وصول كامل لمعرض القوالب',
+    'استنساخ أي قالب مجاني',
+    'تعديل نصوص وألوان غير محدود',
+  ] : [
+    'AI Design Credits to get started',
+    'Free publishing with shareable link',
+    'Full access to template gallery',
+    'Clone any free template',
+    'Unlimited text & color edits',
+  ];
+
+  const proFeatures = lang === 'ar' ? [
+    'أرصدة تصميم ذكي بكميات أكبر',
+    'نشر بنقرة واحدة + SSL مجاني',
+    'دومين مخصص مع إعداد سحري',
+    'أولوية في دعم العملاء',
+    'كل ميزات الخطة المجانية',
+  ] : [
+    '10× more AI Design Credits',
+    'One-click publishing + free SSL',
+    'Custom domain with guided setup',
+    'Priority customer support',
+    'Everything in Free',
+  ];
+
+  return (
+    <section className="border-t border-slate-800 bg-slate-950">
+      <div className="max-w-6xl mx-auto px-8 py-20">
+        <div className="text-center mb-14">
+          <h2 className="text-3xl md:text-4xl font-bold text-white mb-3">{t('pricingTitle')}</h2>
+          <p className="text-slate-400 text-lg">{t('pricingSubtitle')}</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
+          {/* Free */}
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 flex flex-col">
+            <div className="mb-6">
+              <div className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">{t('planFreeTitle')}</div>
+              <div className="flex items-end gap-1 mb-1">
+                <span className="text-4xl font-extrabold text-white">{t('planFreePrice')}</span>
+              </div>
+              <p className="text-sm text-slate-500">{t('planFreeDesc')}</p>
+            </div>
+            <ul className="space-y-3 mb-8 flex-1">
+              {freeFeatures.map((f, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-slate-300">
+                  <Check size={15} className="text-emerald-400 mt-0.5 shrink-0" />
+                  {f}
+                </li>
+              ))}
+            </ul>
+            <Link
+              to="/editor"
+              className="w-full bg-slate-800 hover:bg-slate-700 text-white py-3 rounded-xl text-sm font-semibold text-center transition-colors"
+            >
+              {t('planFreeBadge')}
+            </Link>
+          </div>
+
+          {/* Pro */}
+          <div className="bg-gradient-to-b from-indigo-900/60 to-slate-900 border border-indigo-500/50 rounded-3xl p-8 flex flex-col relative shadow-2xl shadow-indigo-500/20">
+            <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+              <span className="bg-indigo-600 text-white text-xs font-bold px-4 py-1 rounded-full">
+                {lang === 'ar' ? 'الأكثر شيوعاً' : 'Most Popular'}
+              </span>
+            </div>
+            <div className="mb-6">
+              <div className="text-sm font-semibold text-indigo-300 uppercase tracking-wider mb-2">{t('planProTitle')}</div>
+              <div className="flex items-end gap-1 mb-1">
+                <span className="text-4xl font-extrabold text-white">{t('planProPrice')}</span>
+                <span className="text-slate-400 text-sm mb-1">{t('planProPer')}</span>
+              </div>
+              <p className="text-sm text-slate-400">{t('planProDesc')}</p>
+            </div>
+            <ul className="space-y-3 mb-8 flex-1">
+              {proFeatures.map((f, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-slate-200">
+                  <Check size={15} className="text-indigo-400 mt-0.5 shrink-0" />
+                  {f}
+                </li>
+              ))}
+            </ul>
+            <Link
+              to="/editor"
+              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-xl text-sm font-bold text-center transition-all shadow-lg shadow-indigo-500/30"
+            >
+              {t('planProBadge')}
+            </Link>
+          </div>
+
+          {/* Expert / Consulting */}
+          <div className="bg-gradient-to-b from-purple-900/30 to-slate-900 border border-purple-700/40 rounded-3xl p-8 flex flex-col">
+            <div className="mb-6">
+              <div className="w-10 h-10 bg-purple-500/20 rounded-xl flex items-center justify-center mb-4">
+                <Users size={20} className="text-purple-300" />
+              </div>
+              <div className="text-sm font-semibold text-purple-300 uppercase tracking-wider mb-2">{t('planConsultTitle')}</div>
+              <div className="flex items-end gap-1 mb-1">
+                <span className="text-2xl font-extrabold text-white">{t('planConsultPrice')}</span>
+              </div>
+              <p className="text-sm text-slate-400">{t('planConsultDesc')}</p>
+            </div>
+            <ul className="space-y-3 mb-8 flex-1">
+              {(lang === 'ar' ? [
+                'مهندس كيبل متخصص مخصص لك',
+                'تكاملات API مخصصة',
+                'منطق دفع وتسعير معقد',
+                'ميزات تصميم متقدمة',
+                'تسليم في 1–3 أيام عمل',
+              ] : [
+                'Dedicated Capable engineer',
+                'Custom API integrations',
+                'Complex payment & pricing logic',
+                'Advanced design features',
+                'Delivered in 1–3 business days',
+              ]).map((f, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-slate-300">
+                  <Check size={15} className="text-purple-400 mt-0.5 shrink-0" />
+                  {f}
+                </li>
+              ))}
+            </ul>
+            <a
+              href="mailto:hello@capable.app?subject=Expert%20Help%20Request"
+              className="w-full bg-purple-700 hover:bg-purple-600 text-white py-3 rounded-xl text-sm font-semibold text-center transition-colors"
+            >
+              {t('planConsultBadge')}
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export default function LandingPage() {
   const { t, lang } = useLang();
@@ -41,6 +180,12 @@ export default function LandingPage() {
 
       {/* Hero */}
       <main className="max-w-6xl mx-auto px-8 py-20 flex flex-col items-center text-center">
+        {/* Social proof badge */}
+        <div className="flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/30 rounded-full px-4 py-1.5 text-sm text-indigo-300 mb-8">
+          <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
+          {lang === 'ar' ? 'لا يلزم أي خبرة تقنية' : 'No technical experience required'}
+        </div>
+
         <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight mb-8 leading-tight">
           {t('heroTitle1')} <br />
           {t('heroTitle2')} <span className="bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
@@ -71,7 +216,7 @@ export default function LandingPage() {
           </div>
           <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl hover:border-cyan-500/40 transition-colors">
             <div className="w-12 h-12 bg-cyan-500/10 text-cyan-400 rounded-2xl flex items-center justify-center mb-6">
-              <Layers size={24} />
+              <Copy size={24} />
             </div>
             <h3 className="text-xl font-bold text-white mb-3">{t('feature2Title')}</h3>
             <p className="text-slate-400">{t('feature2Desc')}</p>
@@ -86,6 +231,9 @@ export default function LandingPage() {
         </div>
       </main>
 
+      {/* Pricing */}
+      <PricingSection t={t} lang={lang} />
+
       {/* Featured Templates */}
       {templates.length > 0 && (
         <section className="border-t border-slate-800 bg-slate-900/30">
@@ -96,11 +244,11 @@ export default function LandingPage() {
                   {lang === 'ar' ? 'ابدأ من قالب جاهز' : 'Start from a template'}
                 </h2>
                 <p className="text-slate-400">
-                  {lang === 'ar' ? 'اختر تصميماً جاهزاً وعدّله بمساعدة الذكاء الاصطناعي.' : 'Pick a ready-made design and remix it with AI.'}
+                  {lang === 'ar' ? 'اختر تصميماً جاهزاً وعدّله بمساعدة الذكاء الاصطناعي.' : 'Clone any template — it\'s instant. Then describe your changes in plain English.'}
                 </p>
               </div>
               <Link to="/explore" className="text-sm text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
-                {lang === 'ar' ? 'عرض الكل' : 'View all'} <ArrowRight size={14} />
+                {lang === 'ar' ? 'عرض الكل' : 'View all templates'} <ArrowRight size={14} />
               </Link>
             </div>
 
@@ -151,6 +299,26 @@ export default function LandingPage() {
           </div>
         </section>
       )}
+
+      {/* Bottom CTA */}
+      <section className="border-t border-slate-800 bg-slate-950">
+        <div className="max-w-3xl mx-auto px-8 py-20 text-center">
+          <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
+            {lang === 'ar' ? 'فكرتك تستحق أن تُبنى.' : 'Your idea deserves to be built.'}
+          </h2>
+          <p className="text-slate-400 text-lg mb-8">
+            {lang === 'ar'
+              ? 'ابدأ مجاناً، انشر في دقائق، وعندما تحتاج خبيراً — نحن هنا.'
+              : 'Start free, go live in minutes, and when you need an expert — we\'re here.'}
+          </p>
+          <Link
+            to="/editor"
+            className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-4 rounded-full text-lg font-bold transition-all shadow-[0_0_40px_rgba(79,70,229,0.3)]"
+          >
+            {t('startBuilding')} <Zap size={20} />
+          </Link>
+        </div>
+      </section>
 
       <footer className="border-t border-slate-800 py-8 text-center text-slate-500 text-sm">
         © {new Date().getFullYear()} {t('appName')}

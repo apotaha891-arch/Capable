@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
-import { Sparkles, Send, Code2, Eye, Loader, Save, AlertCircle, CheckCircle, Clock, ChevronDown, ChevronUp, Zap, Settings, X, Plus, FileCode, FileType2, FileJson, Camera, Globe, Copy, ShieldCheck, ShoppingBag } from 'lucide-react';
+import { Sparkles, Send, Code2, Eye, Loader, Save, AlertCircle, CheckCircle, Clock, ChevronDown, ChevronUp, Zap, Settings, X, Plus, FileCode, FileType2, FileJson, Camera, Globe, Copy, ShieldCheck, ShoppingBag, Users, ChevronRight } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
@@ -77,7 +77,10 @@ export default function Editor() {
   const [domainBusy, setDomainBusy] = useState(false);
   const [domainMessage, setDomainMessage] = useState(null);
   
-  const [tokenInfo, setTokenInfo] = useState(null); 
+  const [tokenInfo, setTokenInfo] = useState(null);
+  const [generationCount, setGenerationCount] = useState(0);
+  const [showGrowthSignal, setShowGrowthSignal] = useState(false);
+  const [growthDismissed, setGrowthDismissed] = useState(false);
   const { t } = useLang();
   const { authFetch } = useAuth();
   const { id } = useParams();
@@ -293,6 +296,10 @@ export default function Editor() {
       setPrompt('');
       setActiveTab('preview');
       setSuccess(`✓ ${t('generatedIn')} ${elapsed}s`);
+
+      const newCount = generationCount + 1;
+      setGenerationCount(newCount);
+      if (newCount >= 5 && !growthDismissed) setShowGrowthSignal(true);
       
       // Auto-capture thumbnail after a delay to allow rendering
       if (id) {
@@ -482,14 +489,20 @@ export default function Editor() {
         </button>
 
         <div className="flex items-center gap-2 ml-auto">
-          {tokenInfo && (
-            <div className="hidden sm:flex items-center gap-1.5 bg-slate-800 rounded-lg px-3 py-1.5 text-xs">
-              <Zap size={12} className="text-indigo-400" />
-              <span className="text-slate-300">{tokenInfo.tokens_used.toLocaleString()}</span>
-              <span className="text-slate-600">/</span>
-              <span className="text-slate-500">{tokenInfo.tokens_limit.toLocaleString()}</span>
-            </div>
-          )}
+          {tokenInfo && (() => {
+            const pct = Math.round((tokenInfo.tokens_used / tokenInfo.tokens_limit) * 100);
+            const barColor = pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-amber-500' : 'bg-indigo-500';
+            const textColor = pct >= 90 ? 'text-red-400' : pct >= 75 ? 'text-amber-400' : 'text-indigo-400';
+            return (
+              <div className="hidden sm:flex items-center gap-2 bg-slate-800 rounded-lg px-3 py-1.5 text-xs">
+                <Zap size={12} className={textColor} />
+                <span className="text-slate-400">{t('aiCredits')}</span>
+                <div className="w-16 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${Math.min(100 - pct, 100)}%` }} />
+                </div>
+              </div>
+            );
+          })()}
               <button
             onClick={() => { handleSave(); setTimeout(() => captureThumbnail(id), 500); }}
             disabled={saving}
@@ -517,6 +530,29 @@ export default function Editor() {
       {success && (
         <div className="flex items-center gap-2 bg-emerald-900/50 border-b border-emerald-700 px-4 py-2 text-emerald-300 text-sm shrink-0">
           <CheckCircle size={14} />{success}
+        </div>
+      )}
+
+      {/* Growth Signal — consulting upsell */}
+      {showGrowthSignal && (
+        <div className="flex items-center gap-3 bg-indigo-900/60 border-b border-indigo-700/60 px-4 py-2.5 shrink-0">
+          <Users size={15} className="text-indigo-300 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <span className="text-sm font-semibold text-white">{t('growthSignalTitle')}</span>
+            <span className="text-xs text-indigo-300 ml-2">{t('growthSignalDesc')}</span>
+          </div>
+          <a
+            href="mailto:hello@capable.app?subject=Expert%20Help%20Request"
+            className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1 whitespace-nowrap transition-colors"
+          >
+            {t('growthSignalCta')} <ChevronRight size={12} />
+          </a>
+          <button
+            onClick={() => { setShowGrowthSignal(false); setGrowthDismissed(true); }}
+            className="text-slate-400 hover:text-white transition-colors"
+          >
+            <X size={14} />
+          </button>
         </div>
       )}
 
@@ -557,9 +593,10 @@ export default function Editor() {
 
           {/* AI Assistant */}
           <div className="p-4 flex-1 flex flex-col min-h-0 overflow-y-auto">
-            <h2 className="text-sm font-bold text-white mb-3 flex items-center gap-1.5">
+            <h2 className="text-sm font-bold text-white mb-1 flex items-center gap-1.5">
               <Sparkles size={14} className="text-indigo-400" /> {t('aiAssistant')}
             </h2>
+            <p className="text-[10px] text-slate-500 mb-3">{t('aiCreditsDesc')}</p>
 
             <form onSubmit={handleGenerate} className="flex flex-col gap-2">
               <textarea
