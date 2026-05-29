@@ -164,12 +164,34 @@ const ar = {
 
   // Explore
   exploreTitle: 'استكشف المشاريع',
-  exploreDesc: 'اكتشف واجهات وتطبيقات بناها المجتمع.',
+  exploreDesc: 'اكتشف قوالب جاهزة للإطلاق في كل المجالات — استنسخ أو عاين أو انشر بنقرة واحدة.',
   views: 'مشاهدة',
   likes: 'إعجاب',
   openProject: 'فتح المشروع',
   noPublicProjects: 'لا توجد مشاريع عامة بعد.',
   premiumCloneAlert: 'الاستنساخ للمشاريع المدفوعة سيكون متاحاً قريباً.',
+
+  // Admin panel
+  adminPanel: 'لوحة الأدمن',
+  adminOverview: 'نظرة عامة',
+  adminUsers: 'المستخدمون',
+  adminContent: 'المحتوى',
+  adminCrm: 'إدارة العملاء',
+  adminFinance: 'المالية',
+  adminBackToDashboard: 'العودة للوحة التحكم',
+  notifications: 'الإشعارات',
+  noNotifications: 'لا توجد إشعارات بعد',
+  markAllRead: 'تعليم الكل كمقروء',
+
+  // Gallery cards & actions
+  by: 'بواسطة',
+  clone: 'استنساخ',
+  cloneEdit: 'استنساخ وتعديل',
+  deploy: 'نشر',
+  galleryAllFields: 'كل المجالات',
+  galleryCommunity: 'مشاريع المجتمع',
+  galleryPreviewSoon: 'معاينة مباشرة لهذا القالب ستتوفر قريباً.',
+  galleryDeployHint: 'استنسخ هذا القالب أولاً ثم انشره من لوحة التحكم.',
 };
 
 export default ar;

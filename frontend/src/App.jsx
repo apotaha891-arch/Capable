@@ -9,6 +9,7 @@ import Dashboard from './pages/Dashboard.jsx';
 import Explore from './pages/Explore.jsx';
 import Editor from './pages/Editor.jsx';
 import BlueprintEditor from './pages/BlueprintEditor.jsx';
+import Admin from './pages/Admin.jsx';
 
 // Protected route wrapper
 function ProtectedRoute({ children }) {
@@ -21,6 +22,18 @@ function ProtectedRoute({ children }) {
   return user ? children : <Navigate to="/auth" replace />;
 }
 
+// Admin-only route wrapper
+function AdminRoute({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return (
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+  if (!user) return <Navigate to="/auth" replace />;
+  return user.role === 'admin' ? children : <Navigate to="/dashboard" replace />;
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -30,6 +43,7 @@ function AppRoutes() {
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/editor/:id" element={<ProtectedRoute><Editor /></ProtectedRoute>} />
       <Route path="/blueprint/:id" element={<ProtectedRoute><BlueprintEditor /></ProtectedRoute>} />
+      <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

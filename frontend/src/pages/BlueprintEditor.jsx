@@ -6,8 +6,8 @@ import { useLang } from '../i18n/LangContext.jsx';
 import BlueprintPreview from '../blueprint/BlueprintPreview.jsx';
 import FieldEditor from '../blueprint/FieldEditor.jsx';
 import { BLOCK_DEFAULTS, BLOCK_TYPES, newBlockId } from '../blueprint/blockDefaults.js';
-
-const APP_DOMAIN = 'capable.app';
+import { blockLabel } from '../blueprint/labels.js';
+import { siteUrl } from '../utils/site.js';
 
 export default function BlueprintEditor() {
   const { id } = useParams();
@@ -88,7 +88,7 @@ export default function BlueprintEditor() {
     </Center>
   );
 
-  const liveUrl = project?.published_slug ? `https://${project.published_slug}.${APP_DOMAIN}` : null;
+  const liveUrl = project?.published_slug ? siteUrl(project.published_slug) : null;
   const block = bp.blocks[selected];
 
   return (
@@ -141,7 +141,7 @@ export default function BlueprintEditor() {
             <div className="space-y-1">
               {bp.blocks.map((b, i) => (
                 <div key={b.id} className={`flex items-center gap-1 rounded-lg px-2 py-1.5 ${i === selected ? 'bg-indigo-600/20 border border-indigo-600/50' : 'hover:bg-slate-800'}`}>
-                  <button onClick={() => setSelected(i)} className="flex-1 text-left text-sm truncate">{b.type}</button>
+                  <button onClick={() => setSelected(i)} className="flex-1 text-left text-sm truncate">{blockLabel(b.type, lang)}</button>
                   <button onClick={() => moveBlock(i, -1)} className="text-slate-500 hover:text-white p-0.5"><ChevronUp size={14} /></button>
                   <button onClick={() => moveBlock(i, 1)} className="text-slate-500 hover:text-white p-0.5"><ChevronDown size={14} /></button>
                   <button onClick={() => deleteBlock(i)} className="text-slate-500 hover:text-red-400 p-0.5"><Trash2 size={14} /></button>
@@ -150,7 +150,7 @@ export default function BlueprintEditor() {
             </div>
             <div className="mt-3 flex gap-2">
               <select value={addType} onChange={e => setAddType(e.target.value)} className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm">
-                {BLOCK_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                {BLOCK_TYPES.map(bt => <option key={bt} value={bt}>{blockLabel(bt, lang)}</option>)}
               </select>
               <button onClick={addBlock} className="bg-slate-800 hover:bg-slate-700 px-3 rounded-lg flex items-center gap-1 text-sm"><Plus size={14} /></button>
             </div>
@@ -159,8 +159,8 @@ export default function BlueprintEditor() {
           {/* Selected block content */}
           {block && (
             <section>
-              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-3">{block.type}</h3>
-              <FieldEditor value={block.content} fieldKey="content" onChange={content => updateBlockContent(selected, content)} />
+              <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500 mb-3">{blockLabel(block.type, lang)}</h3>
+              <FieldEditor value={block.content} fieldKey="content" lang={lang} onChange={content => updateBlockContent(selected, content)} />
             </section>
           )}
         </aside>

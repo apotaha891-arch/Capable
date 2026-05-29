@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Sparkles, Plus, Trash2, FolderOpen, Globe, Share2, Zap, LogOut, Settings, ArrowUpRight, Compass, Wand2, MessageCircle, Link2, Check, Users, ChevronRight } from 'lucide-react';
+import { Sparkles, Plus, Trash2, FolderOpen, Globe, Share2, Zap, LogOut, Settings, ArrowUpRight, Compass, Wand2, MessageCircle, Link2, Check, Users, ChevronRight, Shield } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
+import NotificationBell from '../components/NotificationBell.jsx';
 import NewProjectModal from '../components/NewProjectModal.jsx';
 import { siteUrl, whatsappShareUrl, shareSite } from '../utils/site.js';
+import CapableLogo from '../components/CapableLogo.jsx';
 
 const PLAN_COLORS = { free: 'text-slate-400', pro: 'text-indigo-400', enterprise: 'text-amber-400' };
 const PLAN_LABELS = { free: 'Free', pro: 'Pro', enterprise: 'Enterprise' };
@@ -134,6 +136,7 @@ export default function Dashboard() {
           <span className="font-bold text-lg bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">{t('appName')}</span>
         </Link>
         <div className="flex items-center gap-3 text-sm">
+          <NotificationBell />
           <LangToggle />
           <Link to="/explore" className="text-slate-300 hover:text-white px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors">{t('explore')}</Link>
         </div>
@@ -209,6 +212,11 @@ export default function Dashboard() {
 
           {/* Actions */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-2">
+            {user?.role === 'admin' && (
+              <Link to="/admin" className="flex items-center gap-2 px-3 py-2 text-sm text-amber-400 hover:text-amber-300 hover:bg-slate-800 rounded-lg transition-colors font-medium">
+                <Shield size={14} /> {t('adminPanel')}
+              </Link>
+            )}
             <Link to="/explore" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
               <Compass size={14} /> {lang === 'ar' ? 'استكشف القوالب' : 'Browse Templates'}
             </Link>

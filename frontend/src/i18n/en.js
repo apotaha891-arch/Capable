@@ -164,12 +164,34 @@ const en = {
 
   // Explore
   exploreTitle: 'Explore Projects',
-  exploreDesc: 'Discover apps and UIs built by the community.',
+  exploreDesc: 'Discover ready-to-launch templates across every field — clone, preview, or deploy in one click.',
   views: 'views',
   likes: 'likes',
   openProject: 'Open Project',
   noPublicProjects: 'No public projects yet.',
   premiumCloneAlert: 'Cloning premium projects will be available soon.',
+
+  // Admin panel
+  adminPanel: 'Admin Panel',
+  adminOverview: 'Overview',
+  adminUsers: 'Users',
+  adminContent: 'Content',
+  adminCrm: 'CRM',
+  adminFinance: 'Finance',
+  adminBackToDashboard: 'Back to Dashboard',
+  notifications: 'Notifications',
+  noNotifications: 'No notifications yet',
+  markAllRead: 'Mark all read',
+
+  // Gallery cards & actions
+  by: 'by',
+  clone: 'Clone',
+  cloneEdit: 'Clone & Edit',
+  deploy: 'Deploy',
+  galleryAllFields: 'All Fields',
+  galleryCommunity: 'Community Projects',
+  galleryPreviewSoon: 'A live preview for this template is coming soon.',
+  galleryDeployHint: 'Clone this template first, then deploy it from your dashboard.',
 };
 
 export default en;

@@ -9,6 +9,8 @@ import {
 import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
+import CapableLogo from '../components/CapableLogo.jsx';
+import { GALLERY_TEMPLATES } from '../data/galleryTemplates.js';
 
 const API = 'http://localhost:5000';
 
@@ -131,7 +133,7 @@ function PricingSection({ t, isRTL }) {
                   </li>
                 ))}
               </ul>
-              <Link to="/editor" className="w-full bg-capable-surface dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-capable-navy dark:text-white py-3 rounded-brand text-sm font-semibold text-center transition-colors border border-gray-200 dark:border-slate-700">
+              <Link to="/dashboard" className="w-full bg-capable-surface dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-capable-navy dark:text-white py-3 rounded-brand text-sm font-semibold text-center transition-colors border border-gray-200 dark:border-slate-700">
                 {t('planFreeBadge')}
               </Link>
             </div>
@@ -161,7 +163,7 @@ function PricingSection({ t, isRTL }) {
                   </li>
                 ))}
               </ul>
-              <Link to="/editor" className="w-full bg-white text-capable-navy dark:bg-indigo-600 dark:text-white hover:bg-capable-surface dark:hover:bg-indigo-500 py-3 rounded-brand text-sm font-bold text-center transition-all">
+              <Link to="/dashboard" className="w-full bg-white text-capable-navy dark:bg-indigo-600 dark:text-white hover:bg-capable-surface dark:hover:bg-indigo-500 py-3 rounded-brand text-sm font-bold text-center transition-all">
                 {t('planProBadge')}
               </Link>
             </div>
@@ -198,15 +200,40 @@ function PricingSection({ t, isRTL }) {
 }
 
 export default function LandingPage() {
-  const { t, isRTL } = useLang();
-  const [templates, setTemplates] = useState([]);
+  const { t, isRTL, lang } = useLang();
+  const [apiTemplates, setApiTemplates] = useState([]);
 
   useEffect(() => {
     fetch(`${API}/api/projects/explore`)
       .then(r => (r.ok ? r.json() : []))
-      .then(list => setTemplates(list.slice(0, 6)))
-      .catch(() => setTemplates([]));
+      .then(list => setApiTemplates(Array.isArray(list) ? list : []))
+      .catch(() => setApiTemplates([]));
   }, []);
+
+  // Real community projects first, then curated demos to always fill the row.
+  const community = apiTemplates.map(p => ({
+    id: `db-${p.id}`,
+    nameEn: p.name_en || p.name,
+    nameAr: p.name_ar || (/[؀-ۿ]/.test(p.name || '') ? p.name : ''),
+    description: p.description,
+    author: p.author,
+    image: p.thumbnail_url,
+    price: p.price || 0,
+    likes: p.likes || 0,
+    previewUrl: `${API}/api/projects/preview/${p.id}`,
+  }));
+  const demos = GALLERY_TEMPLATES.map(tpl => ({
+    id: tpl.id,
+    nameEn: tpl.name_en,
+    nameAr: tpl.name_ar,
+    description: isRTL ? tpl.desc_ar : tpl.desc_en,
+    author: tpl.author,
+    image: tpl.image,
+    price: tpl.price || 0,
+    likes: tpl.likes || 0,
+    previewUrl: null,
+  }));
+  const templates = [...community, ...demos].slice(0, 6);
 
   const ArrowIcon = isRTL ? (
     <ArrowRight size={18} className="rotate-180" />
@@ -228,7 +255,7 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto px-6 md:px-8 py-4 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2.5">
             <div className="bg-capable-navy dark:bg-gradient-to-br dark:from-indigo-500 dark:to-cyan-400 p-2 rounded-brand text-white">
-              <Sparkles size={20} />
+              <CapableLogo size={20} strokeWidth={6.5} />
             </div>
             <span className="font-bold text-xl tracking-tight text-capable-navy dark:bg-gradient-to-r dark:from-indigo-300 dark:to-cyan-300 dark:bg-clip-text dark:text-transparent">
               {t('appName')}
@@ -243,7 +270,7 @@ export default function LandingPage() {
             <Link to="/dashboard" className="hidden sm:inline text-capable-text dark:text-slate-300 hover:text-capable-navy dark:hover:text-white transition-colors px-2">
               {t('dashboard')}
             </Link>
-            <Link to="/editor" className="btn-primary text-sm py-2.5 px-5">
+            <Link to="/dashboard" className="btn-primary text-sm py-2.5 px-5">
               {t('startBuilding')}
             </Link>
           </div>
@@ -286,7 +313,7 @@ export default function LandingPage() {
           <Reveal delay={240}>
             <div className="flex items-center gap-3 mb-10 flex-wrap justify-center">
               <Link
-                to="/editor"
+                to="/dashboard"
                 className="inline-flex items-center gap-2 bg-white text-capable-navy font-bold rounded-brand px-7 py-3.5 transition-colors hover:bg-capable-surface text-base dark:bg-indigo-600 dark:text-white dark:hover:bg-indigo-500 dark:shadow-[0_0_40px_rgba(79,70,229,0.4)]"
               >
                 {t('heroBtnPrimary')}
@@ -473,19 +500,26 @@ export default function LandingPage() {
 
           {templates.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {templates.map((tpl, i) => (
+              {templates.map((tpl, i) => {
+                const primary = isRTL ? (tpl.nameAr || tpl.nameEn) : (tpl.nameEn || tpl.nameAr);
+                const secondary = isRTL ? tpl.nameEn : tpl.nameAr;
+                const showSecondary = secondary && secondary !== primary;
+                const CardTag = tpl.previewUrl ? 'a' : Link;
+                const linkProps = tpl.previewUrl
+                  ? { href: tpl.previewUrl, target: '_blank', rel: 'noreferrer' }
+                  : { to: '/explore' };
+                return (
                 <Reveal key={tpl.id} delay={i * 50}>
-                  <a
-                    href={`${API}/api/projects/preview/${tpl.id}`}
-                    target="_blank"
-                    rel="noreferrer"
+                  <CardTag
+                    {...linkProps}
                     className="group block brand-card overflow-hidden hover:border-capable-light dark:hover:border-indigo-500/50 hover:shadow-brand transition-all h-full flex flex-col"
                   >
                     <div className="relative aspect-video bg-capable-surface dark:bg-slate-950 overflow-hidden border-b border-gray-200 dark:border-slate-800">
-                      {tpl.thumbnail_url ? (
+                      {tpl.image ? (
                         <img
-                          src={tpl.thumbnail_url}
-                          alt={tpl.name}
+                          src={tpl.image}
+                          alt={primary}
+                          loading="lazy"
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         />
                       ) : (
@@ -501,7 +535,12 @@ export default function LandingPage() {
                     </div>
                     <div className="p-4 flex-1 flex flex-col">
                       <div className="flex items-start justify-between gap-2 mb-1">
-                        <h3 className="!text-base !font-bold !text-capable-navy dark:!text-white m-0 truncate">{tpl.name}</h3>
+                        <div className="min-w-0">
+                          <h3 className="!text-base !font-bold !text-capable-navy dark:!text-white m-0 truncate" dir={isRTL ? 'rtl' : 'ltr'}>{primary}</h3>
+                          {showSecondary && (
+                            <p className="text-xs text-capable-muted dark:text-slate-500 truncate" dir={isRTL ? 'ltr' : 'rtl'}>{secondary}</p>
+                          )}
+                        </div>
                         {tpl.price > 0 ? (
                           <span className="text-xs font-bold text-capable-warning shrink-0">${tpl.price}</span>
                         ) : (
@@ -517,9 +556,10 @@ export default function LandingPage() {
                         <span>♥ {tpl.likes}</span>
                       </div>
                     </div>
-                  </a>
+                  </CardTag>
                 </Reveal>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -589,7 +629,7 @@ export default function LandingPage() {
             </Reveal>
             <Reveal delay={200}>
               <Link
-                to="/editor"
+                to="/dashboard"
                 className="inline-flex items-center gap-2 bg-white text-capable-navy font-bold rounded-brand px-8 py-4 transition-colors hover:bg-capable-surface text-base md:text-lg dark:shadow-[0_0_60px_rgba(255,255,255,0.2)]"
               >
                 {t('finalBtn')}
@@ -608,7 +648,7 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto px-6 md:px-8 py-8 flex items-center justify-between flex-wrap gap-4">
           <div className="flex items-center gap-2">
             <div className="bg-capable-navy dark:bg-gradient-to-br dark:from-indigo-500 dark:to-cyan-400 p-1.5 rounded-brand text-white">
-              <Sparkles size={14} />
+              <CapableLogo size={14} strokeWidth={7} />
             </div>
             <span className="font-bold text-capable-navy dark:text-white">{t('appName')}</span>
           </div>

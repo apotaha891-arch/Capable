@@ -1,5 +1,6 @@
 import React from 'react';
 import { Plus, Trash2 } from 'lucide-react';
+import { fieldLabel } from './labels.js';
 
 const LONG_KEYS = new Set(['description', 'answer', 'bio', 'quote', 'subtitle']);
 const inputCls = 'w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none';
@@ -15,7 +16,7 @@ function emptyLike(sample) {
 }
 
 // Recursively renders form controls for an arbitrary JSON value.
-export default function FieldEditor({ value, onChange, fieldKey }) {
+export default function FieldEditor({ value, onChange, fieldKey, lang }) {
   // String
   if (typeof value === 'string') {
     const long = LONG_KEYS.has(fieldKey);
@@ -38,6 +39,7 @@ export default function FieldEditor({ value, onChange, fieldKey }) {
                 <FieldEditor
                   value={item}
                   fieldKey={fieldKey}
+                  lang={lang}
                   onChange={next => {
                     const copy = value.slice();
                     copy[i] = next;
@@ -73,10 +75,11 @@ export default function FieldEditor({ value, onChange, fieldKey }) {
       <div className="space-y-3">
         {Object.keys(value).map(k => (
           <div key={k}>
-            <label className={labelCls}>{k.replace(/_/g, ' ')}</label>
+            <label className={labelCls}>{fieldLabel(k, lang)}</label>
             <FieldEditor
               value={value[k]}
               fieldKey={k}
+              lang={lang}
               onChange={next => onChange({ ...value, [k]: next })}
             />
           </div>

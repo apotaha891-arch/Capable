@@ -18,7 +18,11 @@
       "Bash(node --dns-result-order=ipv4first server.js)",
       "Bash(curl -s -m 2 -o /dev/null http://localhost:5000/api/blueprint/health)",
       "Bash(curl -s http://localhost:5000/api/blueprint/health)",
-      "Bash(curl -s -X POST http://localhost:5000/api/blueprint/generate -H 'Content-Type: application/json' -H 'Authorization: Bearer __TRACKED_VAR__' -d '{\"prompt\":\"عيادة أسنان حديثة في الرياض مع حجز مواعيد\",\"language\":\"ar\"}')"
+      "Bash(curl -s -X POST http://localhost:5000/api/blueprint/generate -H 'Content-Type: application/json' -H 'Authorization: Bearer __TRACKED_VAR__' -d '{\"prompt\":\"عيادة أسنان حديثة في الرياض مع حجز مواعيد\",\"language\":\"ar\"}')",
+      "Bash(node _merge_i18n.cjs)",
+      "Bash(/c/Users/moza4/.claude/skills/gstack/browse/dist/browse viewport *)",
+      "Bash(ls backend/node_modules)",
+      "Bash(ls frontend/node_modules)"
     ]
   }
 }

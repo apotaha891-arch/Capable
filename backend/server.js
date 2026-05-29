@@ -15,8 +15,18 @@ import { generateBlueprint, getFallbackBlueprint, GenerationError } from './src/
 import { BlueprintSchema } from './src/blueprint/schema.js';
 import { activeProviderName } from './src/ai/provider.js';
 import { getUsage, secondsUntilMidnight } from './src/limits.js';
+import { monthlySeries, currentMRR, forecast as buildForecast, cashPosition, recommendations as buildRecommendations } from './src/admin/finance.js';
+import { deliverCampaign, mailMode } from './src/admin/mailer.js';
+import { seedDemoFinance } from './src/admin/seedDemo.js';
 
 dotenv.config();
+
+// Emails that should always be treated as platform admins (comma-separated).
+const ADMIN_EMAILS = new Set(
+  (process.env.ADMIN_EMAILS || 'admin@capable.test')
+    .split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
+);
+const isAdminEmail = (email) => ADMIN_EMAILS.has(String(email || '').toLowerCase());
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -93,7 +103,102 @@ async function initDB() {
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS og_image_url TEXT;
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
       CREATE INDEX IF NOT EXISTS idx_projects_published_slug ON projects(published_slug) WHERE published_slug IS NOT NULL;
+
+      -- Admin & platform management
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS featured BOOLEAN DEFAULT false;
+
+      -- Financial ledger (admin finance panel)
+      CREATE TABLE IF NOT EXISTS transactions (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        type TEXT NOT NULL,                 -- subscription | template_sale | expense | refund | payout | manual_income
+        amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+        status TEXT DEFAULT 'paid',         -- paid | pending | refunded
+        description TEXT,
+        plan TEXT,
+        project_id INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_transactions_created ON transactions(created_at);
+
+      -- In-app notifications (CRM → customers)
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        body TEXT,
+        type TEXT DEFAULT 'info',           -- info | success | warning | promo
+        is_read BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
+
+      -- Email campaigns (CRM)
+      CREATE TABLE IF NOT EXISTS campaigns (
+        id SERIAL PRIMARY KEY,
+        subject TEXT NOT NULL,
+        body TEXT,
+        audience TEXT DEFAULT 'all',        -- all | free | pro | enterprise | paying
+        status TEXT DEFAULT 'draft',        -- draft | sent
+        mode TEXT,                          -- simulated | smtp
+        recipient_count INTEGER DEFAULT 0,
+        opened_count INTEGER DEFAULT 0,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        sent_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS campaign_recipients (
+        id SERIAL PRIMARY KEY,
+        campaign_id INTEGER REFERENCES campaigns(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        email TEXT,
+        status TEXT DEFAULT 'sent',         -- sent | opened | bounced
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Per-project SEO/social (owner control panel)
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS seo_title TEXT;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS seo_description TEXT;
+
+      -- Visitor analytics for published sites
+      CREATE TABLE IF NOT EXISTS page_events (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+        type TEXT DEFAULT 'view',
+        path TEXT,
+        referrer TEXT,
+        device TEXT DEFAULT 'desktop',      -- desktop | mobile | tablet
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_page_events_project ON page_events(project_id, created_at);
+
+      -- Leads / form submissions captured from published sites
+      CREATE TABLE IF NOT EXISTS leads (
+        id SERIAL PRIMARY KEY,
+        project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+        name TEXT,
+        email TEXT,
+        phone TEXT,
+        message TEXT,
+        data JSONB,
+        source_path TEXT,
+        is_read BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_leads_project ON leads(project_id, created_at);
     `);
+
+    // Promote configured admin emails (no-op for emails not yet registered).
+    if (ADMIN_EMAILS.size > 0) {
+      await pool.query(
+        `UPDATE users SET role = 'admin' WHERE LOWER(email) = ANY($1::text[])`,
+        [Array.from(ADMIN_EMAILS)]
+      );
+    }
+
+    await seedDemoFinance(pool);
     console.log('✅ Database schema initialized');
   } catch (err) {
     console.error('❌ Database schema initialization failed', err);
@@ -131,6 +236,43 @@ app.use(async (req, res, next) => {
   } catch (err) {
     console.error('Custom domain lookup failed:', err.message);
   }
+  next();
+});
+
+// Classify a visitor's device from the User-Agent.
+function deviceFromUA(ua = '') {
+  if (/iPad|Tablet/i.test(ua)) return 'tablet';
+  if (/Mobi|Android|iPhone/i.test(ua)) return 'mobile';
+  return 'desktop';
+}
+
+// Tracking + lead-capture snippet injected into published code pages.
+function injectTracking(html, slug) {
+  const base = process.env.BASE_URL || `http://localhost:${port}`;
+  const snippet = `\n<script>(function(){var S=${JSON.stringify(slug)},B=${JSON.stringify(base)};
+try{fetch(B+'/api/track/'+S,{method:'POST',headers:{'Content-Type':'application/json'},keepalive:true,body:JSON.stringify({path:location.pathname,referrer:document.referrer})}).catch(function(){});}catch(e){}
+document.addEventListener('submit',function(e){var f=e.target;if(!f||f.tagName!=='FORM')return;var d={};try{new FormData(f).forEach(function(v,k){d[k]=v});}catch(_){}
+try{fetch(B+'/api/leads/'+S,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:location.pathname,fields:d})}).catch(function(){});}catch(e){}},true);})();</script>\n`;
+  if (typeof html !== 'string') return html;
+  return html.includes('</body>') ? html.replace('</body>', snippet + '</body>') : html + snippet;
+}
+
+// Server-side view tracking for hosted code pages (works without re-publishing).
+// Logs one 'view' event when a slug's index document is requested.
+app.use('/hosted', (req, res, next) => {
+  try {
+    const m = req.path.match(/^\/([^/]+)\/?$/) || req.path.match(/^\/([^/]+)\/index\.html$/);
+    if (m && m[1] !== 'thumbnails') {
+      const slug = m[1];
+      pool.query('SELECT id FROM projects WHERE published_slug = $1 LIMIT 1', [slug])
+        .then(({ rows }) => {
+          if (rows[0]) pool.query(
+            'INSERT INTO page_events (project_id, type, path, referrer, device) VALUES ($1, $2, $3, $4, $5)',
+            [rows[0].id, 'view', req.path, req.get('referer') || null, deviceFromUA(req.get('user-agent'))]
+          ).catch(() => {});
+        }).catch(() => {});
+    }
+  } catch {}
   next();
 });
 
@@ -173,6 +315,19 @@ function requirePlan(...plans) {
   };
 }
 
+// Admin guard — verifies the role from the DB (not just the token).
+async function adminMiddleware(req, res, next) {
+  try {
+    const { rows } = await pool.query('SELECT role, email FROM users WHERE id = $1', [req.user.id]);
+    const u = rows[0];
+    if (!u || (u.role !== 'admin' && !isAdminEmail(u.email)))
+      return res.status(403).json({ error: 'Admin access required' });
+    next();
+  } catch (err) {
+    res.status(500).json({ error: 'Database error', details: err.message });
+  }
+}
+
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -190,12 +345,13 @@ app.post('/api/auth/register', async (req, res) => {
     if (existingRows.length > 0) return res.status(409).json({ error: 'Email already in use' });
 
     const hash = await bcrypt.hash(password, 10);
+    const role = isAdminEmail(email) ? 'admin' : 'user';
     const { rows } = await pool.query(
-      'INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3) RETURNING id',
-      [email.toLowerCase().trim(), name.trim(), hash]
+      'INSERT INTO users (email, name, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id',
+      [email.toLowerCase().trim(), name.trim(), hash, role]
     );
 
-    const user = { id: rows[0].id, email, name, plan: 'free' };
+    const user = { id: rows[0].id, email, name, plan: 'free', role };
     const token = jwt.sign(user, JWT_SECRET, { expiresIn: '30d' });
     res.status(201).json({ token, user });
   } catch (err) {
@@ -215,7 +371,14 @@ app.post('/api/auth/login', async (req, res) => {
     if (!user || !(await bcrypt.compare(password, user.password_hash)))
       return res.status(401).json({ error: 'Invalid email or password' });
 
-    const payload = { id: user.id, email: user.email, name: user.name, plan: user.plan };
+    // Auto-promote configured admin emails on login.
+    let role = user.role || 'user';
+    if (isAdminEmail(user.email) && role !== 'admin') {
+      await pool.query(`UPDATE users SET role = 'admin' WHERE id = $1`, [user.id]);
+      role = 'admin';
+    }
+
+    const payload = { id: user.id, email: user.email, name: user.name, plan: user.plan, role };
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' });
     res.json({ token, user: payload });
   } catch (err) {
@@ -227,7 +390,7 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      'SELECT id, email, name, plan, tokens_used, tokens_limit, created_at FROM users WHERE id = $1',
+      'SELECT id, email, name, plan, role, tokens_used, tokens_limit, created_at FROM users WHERE id = $1',
       [req.user.id]
     );
     const user = rows[0];
@@ -926,6 +1089,313 @@ app.get('/api/usage', authMiddleware, async (req, res) => {
     const { rows: uRows } = await pool.query('SELECT tokens_used, tokens_limit, plan FROM users WHERE id = $1', [req.user.id]);
     const { rows: history } = await pool.query('SELECT * FROM token_usage WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20', [req.user.id]);
     res.json({ ...uRows[0], history });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// USER NOTIFICATIONS (customer-facing)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/notifications — current user's notifications
+app.get('/api/notifications', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, title, body, type, is_read, created_at
+         FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`,
+      [req.user.id]
+    );
+    const unread = rows.filter(n => !n.is_read).length;
+    res.json({ notifications: rows, unread });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// POST /api/notifications/read — mark one or all as read
+app.post('/api/notifications/read', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.body;
+    if (id) await pool.query('UPDATE notifications SET is_read = true WHERE id = $1 AND user_id = $2', [id, req.user.id]);
+    else await pool.query('UPDATE notifications SET is_read = true WHERE user_id = $1', [req.user.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ADMIN PANEL
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Audience → WHERE clause for users targeted by CRM actions.
+function audienceFilter(audience) {
+  switch (audience) {
+    case 'free': return `plan = 'free'`;
+    case 'pro': return `plan = 'pro'`;
+    case 'enterprise': return `plan = 'enterprise'`;
+    case 'paying': return `plan IN ('pro','enterprise')`;
+    default: return 'TRUE';
+  }
+}
+
+// GET /api/admin/overview — top-level KPIs
+app.get('/api/admin/overview', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const [users, projects, mrrInfo, revThisMonth, revLastMonth, newUsers] = await Promise.all([
+      pool.query('SELECT COUNT(*)::int AS c FROM users'),
+      pool.query(`SELECT COUNT(*)::int AS total,
+                         COUNT(*) FILTER (WHERE is_public)::int AS public,
+                         COUNT(*) FILTER (WHERE is_published)::int AS published
+                    FROM projects`),
+      currentMRR(pool),
+      pool.query(`SELECT COALESCE(SUM(amount),0)::float AS s FROM transactions
+                   WHERE type IN ('subscription','template_sale','manual_income')
+                     AND created_at >= date_trunc('month', now())`),
+      pool.query(`SELECT COALESCE(SUM(amount),0)::float AS s FROM transactions
+                   WHERE type IN ('subscription','template_sale','manual_income')
+                     AND created_at >= date_trunc('month', now()) - interval '1 month'
+                     AND created_at <  date_trunc('month', now())`),
+      pool.query(`SELECT COUNT(*)::int AS c FROM users WHERE created_at >= date_trunc('month', now())`),
+    ]);
+
+    const thisM = Math.round(revThisMonth.rows[0].s);
+    const lastM = Math.round(revLastMonth.rows[0].s);
+    const change = lastM > 0 ? Math.round(((thisM - lastM) / lastM) * 1000) / 10 : null;
+
+    res.json({
+      users: users.rows[0].c,
+      newUsersThisMonth: newUsers.rows[0].c,
+      projects: projects.rows[0],
+      mrr: mrrInfo.mrr,
+      planCounts: mrrInfo.planCounts,
+      payingUsers: mrrInfo.payingUsers,
+      arpu: mrrInfo.arpu,
+      revenueThisMonth: thisM,
+      revenueLastMonth: lastM,
+      revenueChangePct: change,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// GET /api/admin/users — all users with project counts
+app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT u.id, u.email, u.name, u.plan, u.role, u.created_at,
+              COUNT(p.id)::int AS project_count,
+              COALESCE(SUM(t.amount) FILTER (WHERE t.type IN ('subscription','template_sale','manual_income')),0)::float AS revenue
+         FROM users u
+         LEFT JOIN projects p ON p.user_id = u.id
+         LEFT JOIN transactions t ON t.user_id = u.id
+        GROUP BY u.id
+        ORDER BY u.created_at DESC`
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// PATCH /api/admin/users/:id — change plan or role
+app.patch('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { plan, role } = req.body;
+    const { rows } = await pool.query(
+      `UPDATE users SET plan = COALESCE($1, plan), role = COALESCE($2, role)
+        WHERE id = $3 RETURNING id, email, name, plan, role`,
+      [plan ?? null, role ?? null, req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// GET /api/admin/projects — all projects with owner
+app.get('/api/admin/projects', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT p.id, p.name, p.description, p.thumbnail_url, p.price, p.likes, p.views,
+              p.is_public, p.is_published, p.featured, p.published_slug, p.created_at,
+              u.name AS author, u.email AS author_email
+         FROM projects p LEFT JOIN users u ON u.id = p.user_id
+        ORDER BY p.created_at DESC LIMIT 500`
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// PATCH /api/admin/projects/:id — price / visibility / publish / feature
+app.patch('/api/admin/projects/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { price, is_public, is_published, featured } = req.body;
+    const { rows } = await pool.query(
+      `UPDATE projects SET
+         price = COALESCE($1, price),
+         is_public = COALESCE($2, is_public),
+         is_published = COALESCE($3, is_published),
+         featured = COALESCE($4, featured)
+       WHERE id = $5
+       RETURNING id, name, price, is_public, is_published, featured`,
+      [price ?? null, is_public ?? null, is_published ?? null, featured ?? null, req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Project not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// DELETE /api/admin/projects/:id
+app.delete('/api/admin/projects/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM projects WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// ── CRM: in-app notifications ──────────────────────────────────────────────
+// POST /api/admin/notifications — broadcast to an audience
+app.post('/api/admin/notifications', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { title, body, type = 'info', audience = 'all' } = req.body;
+    if (!title) return res.status(400).json({ error: 'Title is required' });
+    const { rows: targets } = await pool.query(
+      `SELECT id FROM users WHERE ${audienceFilter(audience)}`
+    );
+    if (targets.length === 0) return res.json({ ok: true, sent: 0 });
+    const values = targets.map((_, i) => `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4})`);
+    const params = targets.flatMap(u => [u.id, title, body || null, type]);
+    await pool.query(
+      `INSERT INTO notifications (user_id, title, body, type) VALUES ${values.join(', ')}`,
+      params
+    );
+    res.json({ ok: true, sent: targets.length });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// ── CRM: email campaigns ────────────────────────────────────────────────────
+// GET /api/admin/campaigns
+app.get('/api/admin/campaigns', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, subject, audience, status, mode, recipient_count, opened_count, sent_at, created_at
+         FROM campaigns ORDER BY created_at DESC LIMIT 100`
+    );
+    res.json({ campaigns: rows, mailMode: mailMode() });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// POST /api/admin/campaigns — create + send to audience
+app.post('/api/admin/campaigns', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { subject, body, audience = 'all' } = req.body;
+    if (!subject) return res.status(400).json({ error: 'Subject is required' });
+
+    const { rows: targets } = await pool.query(
+      `SELECT id, email FROM users WHERE ${audienceFilter(audience)} AND email IS NOT NULL`
+    );
+
+    const { results, mode } = await deliverCampaign({ subject, body }, targets);
+    const opened = results.filter(r => r.status === 'opened').length;
+
+    const { rows: c } = await pool.query(
+      `INSERT INTO campaigns (subject, body, audience, status, mode, recipient_count, opened_count, created_by, sent_at)
+       VALUES ($1, $2, $3, 'sent', $4, $5, $6, $7, now()) RETURNING id`,
+      [subject, body || null, audience, mode, results.length, opened, req.user.id]
+    );
+    const campaignId = c[0].id;
+
+    if (results.length > 0) {
+      const values = results.map((_, i) => `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4})`);
+      const params = results.flatMap(r => [campaignId, r.user_id, r.email, r.status]);
+      await pool.query(
+        `INSERT INTO campaign_recipients (campaign_id, user_id, email, status) VALUES ${values.join(', ')}`,
+        params
+      );
+    }
+
+    res.status(201).json({ id: campaignId, recipient_count: results.length, opened_count: opened, mode });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// ── Finance ─────────────────────────────────────────────────────────────────
+// GET /api/admin/finance — cashflow, forecast, recommendations
+app.get('/api/admin/finance', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const [series, mrrInfo, totalUsersRow] = await Promise.all([
+      monthlySeries(pool, 6),
+      currentMRR(pool),
+      pool.query('SELECT COUNT(*)::int AS c FROM users'),
+    ]);
+    const totalUsers = totalUsersRow.rows[0].c;
+    const fc = buildForecast(series, 3);
+    const cash = cashPosition(series, fc.projection);
+    const recs = buildRecommendations({ series, forecast: fc, mrrInfo, cash, totalUsers });
+
+    const sourceRow = await pool.query(
+      `SELECT type, COALESCE(SUM(amount),0)::float AS s FROM transactions
+        WHERE type IN ('subscription','template_sale')
+          AND created_at >= date_trunc('month', now())
+        GROUP BY type`
+    );
+    const bySource = { subscription: 0, template_sale: 0 };
+    for (const r of sourceRow.rows) bySource[r.type] = Math.round(r.s);
+
+    res.json({
+      series,
+      forecast: fc,
+      cash,
+      mrr: mrrInfo.mrr,
+      arpu: mrrInfo.arpu,
+      payingUsers: mrrInfo.payingUsers,
+      bySource,
+      recommendations: recs,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// GET /api/admin/transactions — recent ledger
+app.get('/api/admin/transactions', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT t.id, t.type, t.amount, t.status, t.description, t.created_at, u.email AS user_email
+         FROM transactions t LEFT JOIN users u ON u.id = t.user_id
+        ORDER BY t.created_at DESC LIMIT 100`
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// POST /api/admin/transactions — manual entry
+app.post('/api/admin/transactions', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { type, amount, description } = req.body;
+    if (!type || amount == null) return res.status(400).json({ error: 'type and amount are required' });
+    const { rows } = await pool.query(
+      `INSERT INTO transactions (type, amount, description, status) VALUES ($1, $2, $3, 'paid') RETURNING *`,
+      [type, amount, description || null]
+    );
+    res.status(201).json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
   }
