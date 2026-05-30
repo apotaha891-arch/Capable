@@ -1,12 +1,8 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
-  "framework": "vite",
-  "env": {
-    "VITE_APP_URL": "@vite_app_url"
-  },
+  "buildCommand": "cd frontend && (node ../node_modules/vite/bin/vite.js build || node node_modules/vite/bin/vite.js build)",
+  "outputDirectory": "frontend/dist",
+  "framework": null,
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/backend/server.js" },
-    { "source": "/(.*)", "destination": "/frontend/index.html" }
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
