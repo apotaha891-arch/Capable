@@ -108,6 +108,11 @@ async function initDB() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS featured BOOLEAN DEFAULT false;
 
+      -- Gallery classification + bilingual names for templates
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS category TEXT;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS name_ar TEXT;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS name_en TEXT;
+
       -- Financial ledger (admin finance panel)
       CREATE TABLE IF NOT EXISTS transactions (
         id SERIAL PRIMARY KEY,
@@ -437,12 +442,13 @@ app.get('/api/projects/explore', optionalAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT p.id, p.name, p.description, p.thumbnail_url, p.price, p.likes, p.views, p.published_slug, p.last_edited,
-              u.name AS author,
-              p.blueprint->>'project_name_en' AS name_en,
-              p.blueprint->>'project_name_ar' AS name_ar
+              p.category, p.featured,
+              COALESCE(p.author, u.name) AS author,
+              COALESCE(p.name_en, p.blueprint->>'project_name_en') AS name_en,
+              COALESCE(p.name_ar, p.blueprint->>'project_name_ar') AS name_ar
        FROM projects p LEFT JOIN users u ON p.user_id = u.id
        WHERE p.is_public = true AND (length(COALESCE(p.code, '')) > 0 OR p.blueprint IS NOT NULL)
-       ORDER BY p.likes DESC, p.created_at DESC LIMIT 50`
+       ORDER BY p.featured DESC NULLS LAST, p.likes DESC, p.created_at DESC LIMIT 60`
     );
     res.json(rows);
   } catch (err) {

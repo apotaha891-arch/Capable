@@ -7,10 +7,9 @@ import { useAuth } from '../context/AuthContext.jsx';
 import NewProjectModal from '../components/NewProjectModal.jsx';
 import GalleryCard from '../components/GalleryCard.jsx';
 import GalleryPreviewModal from '../components/GalleryPreviewModal.jsx';
-import { GALLERY_TEMPLATES, CATEGORIES, categoryLabel } from '../data/galleryTemplates.js';
+import { CATEGORIES, categoryLabel } from '../data/galleryTemplates.js';
 
 const API = 'http://localhost:5000';
-const COMMUNITY = 'community';
 
 export default function Explore() {
   const [apiProjects, setApiProjects] = useState([]);
@@ -29,49 +28,30 @@ export default function Explore() {
       .catch(() => setLoading(false));
   }, []);
 
-  // Normalize real community projects + curated demo templates into one shape.
-  const projects = useMemo(() => {
-    const community = apiProjects.map(p => ({
-      id: `db-${p.id}`,
-      dbId: p.id,
-      nameEn: p.name_en || p.name,
-      nameAr: p.name_ar || (/[؀-ۿ]/.test(p.name || '') ? p.name : ''),
-      description: p.description || t('showcaseTemplateDesc'),
-      author: p.author,
-      image: p.thumbnail_url,
-      price: p.price || 0,
-      likes: p.likes || 0,
-      views: p.views || 0,
-      category: COMMUNITY,
-      previewUrl: `${API}/api/projects/preview/${p.id}`,
-      isDemo: false,
-    }));
+  // Normalize the real projects served from the API.
+  const projects = useMemo(() => apiProjects.map(p => ({
+    id: `db-${p.id}`,
+    dbId: p.id,
+    nameEn: p.name_en || p.name,
+    nameAr: p.name_ar || (/[؀-ۿ]/.test(p.name || '') ? p.name : ''),
+    description: p.description || t('showcaseTemplateDesc'),
+    author: p.author,
+    image: p.thumbnail_url,
+    price: p.price || 0,
+    likes: p.likes || 0,
+    views: p.views || 0,
+    category: p.category || 'other',
+    previewUrl: `${API}/api/projects/preview/${p.id}`,
+    isDemo: false,
+  })), [apiProjects, t]);
 
-    const demos = GALLERY_TEMPLATES.map(tpl => ({
-      id: tpl.id,
-      nameEn: tpl.name_en,
-      nameAr: tpl.name_ar,
-      description: lang === 'ar' ? tpl.desc_ar : tpl.desc_en,
-      author: tpl.author,
-      image: tpl.image,
-      price: tpl.price || 0,
-      likes: tpl.likes || 0,
-      views: tpl.views || 0,
-      category: tpl.category,
-      previewUrl: null,
-      isDemo: true,
-    }));
-
-    return [...community, ...demos];
-  }, [apiProjects, lang, t]);
-
-  // Build the list of category sections in display order, only non-empty ones.
+  // Group real projects by their classified field, only non-empty sections.
   const sections = useMemo(() => {
-    const order = [{ id: COMMUNITY, label: t('galleryCommunity') }, ...CATEGORIES.map(c => ({ id: c.id, label: categoryLabel(c.id, lang) }))];
+    const order = CATEGORIES.map(c => ({ id: c.id, label: categoryLabel(c.id, lang) }));
     return order
       .map(s => ({ ...s, items: projects.filter(p => p.category === s.id) }))
       .filter(s => s.items.length > 0);
-  }, [projects, lang, t]);
+  }, [projects, lang]);
 
   const visibleSections = activeCat === 'all' ? sections : sections.filter(s => s.id === activeCat);
 

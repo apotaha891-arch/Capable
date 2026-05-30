@@ -10,7 +10,6 @@ import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
 import CapableLogo from '../components/CapableLogo.jsx';
-import { GALLERY_TEMPLATES } from '../data/galleryTemplates.js';
 
 const API = 'http://localhost:5000';
 
@@ -210,8 +209,8 @@ export default function LandingPage() {
       .catch(() => setApiTemplates([]));
   }, []);
 
-  // Real community projects first, then curated demos to always fill the row.
-  const community = apiTemplates.map(p => ({
+  // Real published projects (featured first from the API), top 6.
+  const templates = apiTemplates.slice(0, 6).map(p => ({
     id: `db-${p.id}`,
     nameEn: p.name_en || p.name,
     nameAr: p.name_ar || (/[؀-ۿ]/.test(p.name || '') ? p.name : ''),
@@ -222,18 +221,6 @@ export default function LandingPage() {
     likes: p.likes || 0,
     previewUrl: `${API}/api/projects/preview/${p.id}`,
   }));
-  const demos = GALLERY_TEMPLATES.map(tpl => ({
-    id: tpl.id,
-    nameEn: tpl.name_en,
-    nameAr: tpl.name_ar,
-    description: isRTL ? tpl.desc_ar : tpl.desc_en,
-    author: tpl.author,
-    image: tpl.image,
-    price: tpl.price || 0,
-    likes: tpl.likes || 0,
-    previewUrl: null,
-  }));
-  const templates = [...community, ...demos].slice(0, 6);
 
   const ArrowIcon = isRTL ? (
     <ArrowRight size={18} className="rotate-180" />
