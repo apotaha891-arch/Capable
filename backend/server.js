@@ -484,7 +484,7 @@ app.post('/api/projects', authMiddleware, async (req, res) => {
 // PUT /api/projects/:id
 app.put('/api/projects/:id', authMiddleware, async (req, res) => {
   try {
-    const { name, description, thumbnail_url, price, code, is_public, custom_domain } = req.body;
+    const { name, description, thumbnail_url, price, code, is_public, custom_domain, seo_title, seo_description, og_image_url } = req.body;
     const { rows: projRows } = await pool.query('SELECT id FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
     if (projRows.length === 0) return res.status(404).json({ error: 'Project not found' });
 
@@ -496,9 +496,12 @@ app.put('/api/projects/:id', authMiddleware, async (req, res) => {
       code = COALESCE($5, code),
       is_public = COALESCE($6, is_public),
       custom_domain = COALESCE($7, custom_domain),
+      seo_title = COALESCE($8, seo_title),
+      seo_description = COALESCE($9, seo_description),
+      og_image_url = COALESCE($10, og_image_url),
       last_edited = NOW()
-      WHERE id = $8`,
-      [name ?? null, description ?? null, thumbnail_url ?? null, price ?? null, code ?? null, is_public ?? null, custom_domain ?? null, req.params.id]
+      WHERE id = $11`,
+      [name ?? null, description ?? null, thumbnail_url ?? null, price ?? null, code ?? null, is_public ?? null, custom_domain ?? null, seo_title ?? null, seo_description ?? null, og_image_url ?? null, req.params.id]
     );
 
     res.json({ success: true });
@@ -560,7 +563,7 @@ app.post('/api/projects/:id/publish', authMiddleware, async (req, res) => {
     const projectDir = path.join(hostedDir, slug);
     if (!fs.existsSync(projectDir)) fs.mkdirSync(projectDir, { recursive: true });
 
-    fs.writeFileSync(path.join(projectDir, 'index.html'), project.code, 'utf-8');
+    fs.writeFileSync(path.join(projectDir, 'index.html'), injectTracking(project.code, slug), 'utf-8');
 
     await pool.query('UPDATE projects SET is_published = true, published_slug = $1, is_public = true WHERE id = $2', [slug, req.params.id]);
 
@@ -1089,6 +1092,134 @@ app.get('/api/usage', authMiddleware, async (req, res) => {
     const { rows: uRows } = await pool.query('SELECT tokens_used, tokens_limit, plan FROM users WHERE id = $1', [req.user.id]);
     const { rows: history } = await pool.query('SELECT * FROM token_usage WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20', [req.user.id]);
     res.json({ ...uRows[0], history });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PUBLIC CAPTURE (called from published sites — no auth)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// POST /api/track/:slug — record a page view
+app.post('/api/track/:slug', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT id FROM projects WHERE published_slug = $1 LIMIT 1', [req.params.slug]);
+    if (rows[0]) {
+      await pool.query(
+        'INSERT INTO page_events (project_id, type, path, referrer, device) VALUES ($1, $2, $3, $4, $5)',
+        [rows[0].id, 'view', req.body?.path || '/', req.body?.referrer || req.get('referer') || null, deviceFromUA(req.get('user-agent'))]
+      );
+    }
+    res.status(204).end();
+  } catch { res.status(204).end(); }
+});
+
+// POST /api/leads/:slug — capture a form submission
+app.post('/api/leads/:slug', async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT id FROM projects WHERE published_slug = $1 LIMIT 1', [req.params.slug]);
+    if (!rows[0]) return res.status(404).json({ error: 'Site not found' });
+
+    const f = { ...(req.body?.fields || {}), ...req.body };
+    delete f.fields; delete f.source;
+    const find = (re) => Object.entries(f).find(([k, v]) => re.test(k) || (typeof v === 'string' && re.test(v)))?.[1];
+    const email = find(/email|@/i);
+    const name = f.name || f.full_name || f.fullname || f.fullName;
+    const phone = f.phone || f.tel || f.mobile || f.whatsapp;
+    const message = f.message || f.msg || f.comment || f.text || f.note;
+
+    await pool.query(
+      `INSERT INTO leads (project_id, name, email, phone, message, data, source_path)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [rows[0].id, name || null, email || null, phone || null, message || null, JSON.stringify(f), req.body?.source || null]
+    );
+    res.status(201).json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PROJECT OWNER CONTROL PANEL
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Resolve a project the caller owns (admins may access any). Returns row or null.
+async function ownedProject(req) {
+  const { rows } = await pool.query('SELECT * FROM projects WHERE id = $1', [req.params.id]);
+  const p = rows[0];
+  if (!p) return null;
+  if (p.user_id === req.user.id) return p;
+  const { rows: u } = await pool.query('SELECT role FROM users WHERE id = $1', [req.user.id]);
+  return u[0]?.role === 'admin' ? p : null;
+}
+
+// GET /api/projects/:id/analytics?days=14
+app.get('/api/projects/:id/analytics', authMiddleware, async (req, res) => {
+  try {
+    const p = await ownedProject(req);
+    if (!p) return res.status(404).json({ error: 'Project not found' });
+    const days = Math.min(90, Math.max(7, parseInt(req.query.days, 10) || 14));
+
+    const [series, totals, refs, devices, leadsCount] = await Promise.all([
+      pool.query(
+        `SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS d, COUNT(*)::int AS c
+           FROM page_events WHERE project_id = $1 AND type = 'view'
+            AND created_at >= now() - ($2::int - 1) * interval '1 day'
+          GROUP BY 1`, [p.id, days]),
+      pool.query(`SELECT COUNT(*)::int AS c FROM page_events WHERE project_id = $1 AND type = 'view'`, [p.id]),
+      pool.query(
+        `SELECT COALESCE(NULLIF(referrer,''),'Direct') AS r, COUNT(*)::int AS c
+           FROM page_events WHERE project_id = $1 AND type='view' GROUP BY 1 ORDER BY c DESC LIMIT 5`, [p.id]),
+      pool.query(`SELECT device, COUNT(*)::int AS c FROM page_events WHERE project_id=$1 AND type='view' GROUP BY 1`, [p.id]),
+      pool.query(`SELECT COUNT(*)::int AS c FROM leads WHERE project_id = $1`, [p.id]),
+    ]);
+
+    // Fill the day series with zeros so the chart is continuous.
+    const byDay = Object.fromEntries(series.rows.map(r => [r.d, r.c]));
+    const out = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const dt = new Date(); dt.setDate(dt.getDate() - i);
+      const key = dt.toISOString().slice(0, 10);
+      out.push({ date: key, label: `${dt.getDate()}/${dt.getMonth() + 1}`, views: byDay[key] || 0 });
+    }
+
+    res.json({
+      totalViews: totals.rows[0].c,
+      viewsInRange: out.reduce((a, b) => a + b.views, 0),
+      series: out,
+      byReferrer: refs.rows,
+      byDevice: devices.rows,
+      leadsCount: leadsCount.rows[0].c,
+      likes: p.likes || 0,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// GET /api/projects/:id/leads
+app.get('/api/projects/:id/leads', authMiddleware, async (req, res) => {
+  try {
+    const p = await ownedProject(req);
+    if (!p) return res.status(404).json({ error: 'Project not found' });
+    const { rows } = await pool.query(
+      `SELECT id, name, email, phone, message, data, source_path, is_read, created_at
+         FROM leads WHERE project_id = $1 ORDER BY created_at DESC LIMIT 200`, [p.id]
+    );
+    res.json({ leads: rows, unread: rows.filter(l => !l.is_read).length });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// POST /api/projects/:id/leads/:leadId/read
+app.post('/api/projects/:id/leads/:leadId/read', authMiddleware, async (req, res) => {
+  try {
+    const p = await ownedProject(req);
+    if (!p) return res.status(404).json({ error: 'Project not found' });
+    await pool.query('UPDATE leads SET is_read = true WHERE id = $1 AND project_id = $2', [req.params.leadId, p.id]);
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
   }

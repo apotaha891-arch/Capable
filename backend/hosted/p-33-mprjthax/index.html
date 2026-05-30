@@ -1,0 +1,6 @@
+<!DOCTYPE html><html><head><meta charset=utf-8><title>Nimbus Waitlist</title></head><body><h1>Nimbus AI</h1><form><input name=name><input name=email type=email><textarea name=message></textarea><button>Join</button></form>
+<script>(function(){var S="p-33-mprjthax",B="http://localhost:5000";
+try{fetch(B+'/api/track/'+S,{method:'POST',headers:{'Content-Type':'application/json'},keepalive:true,body:JSON.stringify({path:location.pathname,referrer:document.referrer})}).catch(function(){});}catch(e){}
+document.addEventListener('submit',function(e){var f=e.target;if(!f||f.tagName!=='FORM')return;var d={};try{new FormData(f).forEach(function(v,k){d[k]=v});}catch(_){}
+try{fetch(B+'/api/leads/'+S,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:location.pathname,fields:d})}).catch(function(){});}catch(e){}},true);})();</script>
+</body></html>

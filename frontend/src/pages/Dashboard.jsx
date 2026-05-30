@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Sparkles, Plus, Trash2, FolderOpen, Globe, Share2, Zap, LogOut, Settings, ArrowUpRight, Compass, Wand2, MessageCircle, Link2, Check, Users, ChevronRight, Shield } from 'lucide-react';
+import { Sparkles, Plus, Trash2, FolderOpen, Globe, Share2, Zap, LogOut, Settings, ArrowUpRight, Compass, Wand2, MessageCircle, Link2, Check, Users, ChevronRight, Shield, Gauge } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
@@ -362,6 +362,13 @@ function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
             className="flex-1 bg-slate-800 hover:bg-indigo-600 text-white text-center py-1.5 rounded-lg text-xs font-medium transition-colors"
           >
             {t('edit')}
+          </Link>
+          <Link
+            to={`/project/${project.id}`}
+            title={lang === 'ar' ? 'لوحة تحكم المشروع' : 'Project control panel'}
+            className="border border-slate-700 hover:border-indigo-500 hover:text-indigo-400 text-slate-400 rounded-lg p-1.5 transition-colors"
+          >
+            <Gauge size={13} />
           </Link>
           {project.is_published ? (
             <a

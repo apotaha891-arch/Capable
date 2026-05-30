@@ -1,0 +1,285 @@
+import React, { useState, useEffect } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import {
+  LayoutDashboard, BarChart3, Inbox, Settings as SettingsIcon, ArrowLeft,
+  Globe, Eye, Heart, Users, ExternalLink, Mail, Phone, MessageSquare, Pencil,
+} from 'lucide-react';
+import { useLang } from '../i18n/LangContext.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
+import LangToggle from '../components/LangToggle.jsx';
+import { StatCard, Spinner, LineChart, tt } from '../admin/AdminShared.jsx';
+import { siteUrl } from '../utils/site.js';
+
+export default function ProjectPanel() {
+  const { id } = useParams();
+  const { t, lang, isRTL } = useLang();
+  const { authFetch } = useAuth();
+  const [project, setProject] = useState(null);
+  const [tab, setTab] = useState('overview');
+
+  const loadProject = () => authFetch(`/api/projects/${id}`).then(r => r.json()).then(setProject).catch(() => setProject(false));
+  useEffect(() => { loadProject(); }, [id]);
+
+  if (project == null) return <div className="min-h-screen bg-slate-950"><Spinner /></div>;
+  if (project === false) return <div className="min-h-screen bg-slate-950 text-slate-300 flex items-center justify-center">{tt(lang, 'Project not found.', 'المشروع غير موجود.')}</div>;
+
+  const liveUrl = project.blueprint
+    ? siteUrl(project.published_slug)
+    : `http://localhost:5000/hosted/${project.published_slug}/index.html`;
+
+  const tabs = [
+    { id: 'overview', label: tt(lang, 'Overview', 'نظرة عامة'), icon: LayoutDashboard },
+    { id: 'analytics', label: tt(lang, 'Analytics', 'التحليلات'), icon: BarChart3 },
+    { id: 'leads', label: tt(lang, 'Leads', 'العملاء المحتملون'), icon: Inbox },
+    { id: 'settings', label: tt(lang, 'Settings', 'الإعدادات'), icon: SettingsIcon },
+  ];
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
+      <nav className="flex items-center justify-between px-6 py-3 border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-30">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <Link to="/dashboard" className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800">
+            <ArrowLeft size={18} className={isRTL ? 'rotate-180' : ''} />
+          </Link>
+          <span className="font-bold text-lg text-white truncate">{project.name}</span>
+          {project.is_published
+            ? <span className="text-[10px] bg-emerald-500/15 text-emerald-400 px-2 py-0.5 rounded-full">{tt(lang, 'Live', 'منشور')}</span>
+            : <span className="text-[10px] bg-slate-700 text-slate-300 px-2 py-0.5 rounded-full">{tt(lang, 'Draft', 'مسودة')}</span>}
+        </div>
+        <div className="flex items-center gap-3">
+          <LangToggle />
+          <Link to={project.blueprint ? `/blueprint/${id}` : `/editor/${id}`}
+            className="flex items-center gap-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg">
+            <Pencil size={14} /> {t('edit')}
+          </Link>
+        </div>
+      </nav>
+
+      <main className="max-w-6xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-[200px_1fr] gap-6">
+        <aside className="lg:sticky lg:top-20 self-start">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-2 flex lg:flex-col gap-1 overflow-x-auto">
+            {tabs.map(({ id: tid, label, icon: Icon }) => (
+              <button key={tid} onClick={() => setTab(tid)}
+                className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${tab === tid ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'}`}>
+                <Icon size={16} /> {label}
+              </button>
+            ))}
+          </div>
+        </aside>
+
+        <section>
+          {tab === 'overview' && <Overview project={project} liveUrl={liveUrl} lang={lang} authFetch={authFetch} reload={loadProject} />}
+          {tab === 'analytics' && <Analytics id={id} lang={lang} authFetch={authFetch} />}
+          {tab === 'leads' && <Leads id={id} lang={lang} authFetch={authFetch} />}
+          {tab === 'settings' && <SettingsTab project={project} lang={lang} authFetch={authFetch} reload={loadProject} t={t} />}
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function Overview({ project, liveUrl, lang, authFetch, reload }) {
+  const [a, setA] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { authFetch(`/api/projects/${project.id}/analytics?days=14`).then(r => r.json()).then(setA).catch(() => setA(false)); }, [project.id]);
+
+  const publish = async () => {
+    setBusy(true);
+    await authFetch(`/api/projects/${project.id}/publish`, { method: 'POST' });
+    setBusy(false); reload();
+  };
+  const unpublish = async () => {
+    setBusy(true);
+    await authFetch(`/api/projects/${project.id}/unpublish`, { method: 'POST' });
+    setBusy(false); reload();
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+        <StatCard icon={<Eye size={16} />} tone="indigo" label={tt(lang, 'Total Views', 'إجمالي المشاهدات')} value={a ? a.totalViews : '…'} sub={a ? tt(lang, `${a.viewsInRange} in 14 days`, `${a.viewsInRange} خلال ١٤ يوماً`) : ''} />
+        <StatCard icon={<Inbox size={16} />} tone="emerald" label={tt(lang, 'Leads', 'العملاء المحتملون')} value={a ? a.leadsCount : '…'} />
+        <StatCard icon={<Heart size={16} />} tone="rose" label={tt(lang, 'Likes', 'الإعجابات')} value={a ? a.likes : (project.likes || 0)} />
+        <StatCard icon={<Globe size={16} />} tone="cyan" label={tt(lang, 'Status', 'الحالة')} value={project.is_published ? tt(lang, 'Live', 'منشور') : tt(lang, 'Draft', 'مسودة')} />
+      </div>
+
+      {/* Live link + publish controls */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <h3 className="text-sm font-bold text-white mb-3">{tt(lang, 'Publishing', 'النشر')}</h3>
+        {project.is_published ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <a href={liveUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-sm text-indigo-400 hover:text-indigo-300 bg-slate-800/60 px-3 py-2 rounded-lg break-all">
+              <ExternalLink size={14} /> {liveUrl}
+            </a>
+            <button onClick={unpublish} disabled={busy} className="text-sm border border-slate-700 hover:border-amber-500 hover:text-amber-400 text-slate-300 px-4 py-2 rounded-lg">
+              {tt(lang, 'Unpublish', 'إلغاء النشر')}
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <p className="text-sm text-slate-400">{tt(lang, 'This project is not live yet.', 'هذا المشروع غير منشور بعد.')}</p>
+            <button onClick={publish} disabled={busy} className="text-sm bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg flex items-center gap-1.5">
+              <Globe size={14} /> {tt(lang, 'Publish now', 'انشر الآن')}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {a && a.series && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+          <h3 className="text-sm font-bold text-white mb-4">{tt(lang, 'Visits — last 14 days', 'الزيارات — آخر ١٤ يوماً')}</h3>
+          <LineChart data={a.series} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Analytics({ id, lang, authFetch }) {
+  const [a, setA] = useState(null);
+  useEffect(() => { authFetch(`/api/projects/${id}/analytics?days=30`).then(r => r.json()).then(setA).catch(() => setA(false)); }, [id]);
+  if (a == null) return <Spinner />;
+  if (a === false) return <p className="text-slate-400">{tt(lang, 'Failed to load.', 'فشل التحميل.')}</p>;
+  const totalDev = a.byDevice.reduce((s, d) => s + d.c, 0) || 1;
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <h3 className="text-sm font-bold text-white mb-4">{tt(lang, 'Visits — last 30 days', 'الزيارات — آخر ٣٠ يوماً')}</h3>
+        <LineChart data={a.series} />
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+          <h3 className="text-sm font-bold text-white mb-4">{tt(lang, 'Top Sources', 'أهم المصادر')}</h3>
+          {a.byReferrer.length === 0 ? <p className="text-sm text-slate-500">{tt(lang, 'No data yet.', 'لا توجد بيانات بعد.')}</p> : (
+            <ul className="space-y-2">
+              {a.byReferrer.map((r, i) => (
+                <li key={i} className="flex items-center justify-between text-sm">
+                  <span className="text-slate-300 truncate">{r.r}</span>
+                  <span className="text-slate-500">{r.c}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+          <h3 className="text-sm font-bold text-white mb-4">{tt(lang, 'Devices', 'الأجهزة')}</h3>
+          {a.byDevice.length === 0 ? <p className="text-sm text-slate-500">{tt(lang, 'No data yet.', 'لا توجد بيانات بعد.')}</p> : (
+            <div className="space-y-3">
+              {a.byDevice.map((d, i) => (
+                <div key={i}>
+                  <div className="flex justify-between text-xs text-slate-400 mb-1">
+                    <span className="capitalize">{d.device}</span><span>{Math.round((d.c / totalDev) * 100)}%</span>
+                  </div>
+                  <div className="w-full bg-slate-800 rounded-full h-1.5">
+                    <div className="h-1.5 rounded-full bg-indigo-500" style={{ width: `${(d.c / totalDev) * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Leads({ id, lang, authFetch }) {
+  const [data, setData] = useState(null);
+  useEffect(() => { load(); }, [id]);
+  const load = () => authFetch(`/api/projects/${id}/leads`).then(r => r.json()).then(setData).catch(() => setData(false));
+  const markRead = async (leadId) => {
+    setData(d => ({ ...d, leads: d.leads.map(l => l.id === leadId ? { ...l, is_read: true } : l) }));
+    await authFetch(`/api/projects/${id}/leads/${leadId}/read`, { method: 'POST' });
+  };
+
+  if (data == null) return <Spinner />;
+  if (data === false) return <p className="text-slate-400">{tt(lang, 'Failed to load.', 'فشل التحميل.')}</p>;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-bold text-white">{tt(lang, 'Leads Inbox', 'صندوق العملاء المحتملين')}</h2>
+        {data.unread > 0 && <span className="text-xs bg-rose-500/15 text-rose-400 px-2 py-1 rounded-full">{data.unread} {tt(lang, 'new', 'جديد')}</span>}
+      </div>
+      {data.leads.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-56 border-2 border-dashed border-slate-800 rounded-3xl text-center">
+          <Inbox size={36} className="text-slate-600 mb-3" />
+          <p className="text-slate-400">{tt(lang, 'No leads yet.', 'لا يوجد عملاء محتملون بعد.')}</p>
+          <p className="text-xs text-slate-600 mt-1">{tt(lang, 'Form submissions from your live site appear here.', 'إرسالات النماذج من موقعك المنشور تظهر هنا.')}</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {data.leads.map(l => (
+            <div key={l.id} onClick={() => !l.is_read && markRead(l.id)}
+              className={`bg-slate-900 border rounded-2xl p-4 ${l.is_read ? 'border-slate-800' : 'border-indigo-600/40 bg-indigo-500/5 cursor-pointer'}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-white">{l.name || tt(lang, 'Anonymous', 'بدون اسم')}</span>
+                    {!l.is_read && <span className="w-2 h-2 rounded-full bg-indigo-400" />}
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs text-slate-400">
+                    {l.email && <span className="flex items-center gap-1"><Mail size={12} /> {l.email}</span>}
+                    {l.phone && <span className="flex items-center gap-1"><Phone size={12} /> {l.phone}</span>}
+                  </div>
+                  {l.message && <p className="text-sm text-slate-300 mt-2 flex items-start gap-1.5"><MessageSquare size={13} className="mt-0.5 shrink-0 text-slate-500" /> {l.message}</p>}
+                </div>
+                <span className="text-[11px] text-slate-500 shrink-0">{new Date(l.created_at).toLocaleString()}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SettingsTab({ project, lang, authFetch, reload, t }) {
+  const [form, setForm] = useState({
+    name: project.name || '', description: project.description || '',
+    seo_title: project.seo_title || '', seo_description: project.seo_description || '',
+    og_image_url: project.og_image_url || '', custom_domain: project.custom_domain || '',
+  });
+  const [saved, setSaved] = useState(false);
+  const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const save = async (e) => {
+    e.preventDefault();
+    await authFetch(`/api/projects/${project.id}`, { method: 'PUT', body: JSON.stringify(form) });
+    setSaved(true); setTimeout(() => setSaved(false), 1800); reload();
+  };
+
+  const Field = ({ label, k, ph, textarea }) => (
+    <label className="block">
+      <span className="text-xs text-slate-400">{label}</span>
+      {textarea
+        ? <textarea value={form[k]} onChange={set(k)} rows={3} placeholder={ph} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none resize-none" />
+        : <input value={form[k]} onChange={set(k)} placeholder={ph} className="mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none" />}
+    </label>
+  );
+
+  return (
+    <form onSubmit={save} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 max-w-2xl">
+      <h2 className="text-lg font-bold text-white">{tt(lang, 'Project Settings', 'إعدادات المشروع')}</h2>
+      <Field label={tt(lang, 'Project name', 'اسم المشروع')} k="name" />
+      <Field label={tt(lang, 'Description', 'الوصف')} k="description" textarea />
+      <div className="border-t border-slate-800 pt-4">
+        <h3 className="text-sm font-semibold text-white mb-3">{tt(lang, 'SEO & Social', 'تحسين الظهور والمشاركة')}</h3>
+        <div className="space-y-4">
+          <Field label={tt(lang, 'SEO title', 'عنوان SEO')} k="seo_title" ph={tt(lang, 'Title shown in search & tabs', 'العنوان في البحث والتبويبات')} />
+          <Field label={tt(lang, 'SEO description', 'وصف SEO')} k="seo_description" textarea />
+          <Field label={tt(lang, 'Social image URL (OG)', 'رابط صورة المشاركة (OG)')} k="og_image_url" ph="https://…" />
+        </div>
+      </div>
+      <div className="border-t border-slate-800 pt-4">
+        <Field label={tt(lang, 'Custom domain', 'دومين مخصص')} k="custom_domain" ph="example.com" />
+        <p className="text-[11px] text-slate-600 mt-1">{tt(lang, 'Point your domain’s DNS to Capable, then verify from the editor.', 'وجّه DNS للدومين إلى Capable ثم فعّله من المحرّر.')}</p>
+      </div>
+      <div className="flex items-center gap-3">
+        <button className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-sm font-semibold">{t('save')}</button>
+        {saved && <span className="text-sm text-emerald-400">✓ {tt(lang, 'Saved', 'تم الحفظ')}</span>}
+      </div>
+    </form>
+  );
+}

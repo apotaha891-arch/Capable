@@ -74,6 +74,36 @@ export function BarChart({ data, lang }) {
   );
 }
 
+// Daily line/area chart (e.g. visits over time). data: [{ label, views }]
+export function LineChart({ data, color = '#6366f1' }) {
+  if (!data || data.length === 0) return null;
+  const W = 640, H = 160, pad = 8;
+  const max = Math.max(1, ...data.map(d => d.views));
+  const stepX = (W - pad * 2) / Math.max(1, data.length - 1);
+  const pts = data.map((d, i) => [pad + i * stepX, H - pad - (d.views / max) * (H - pad * 2)]);
+  const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const area = `${line} L${pts[pts.length - 1][0].toFixed(1)},${H - pad} L${pts[0][0].toFixed(1)},${H - pad} Z`;
+  const showEvery = Math.ceil(data.length / 8);
+  return (
+    <div className="overflow-x-auto">
+      <svg viewBox={`0 0 ${W} ${H + 18}`} className="w-full" style={{ minWidth: 480 }}>
+        <defs>
+          <linearGradient id="lc" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.35" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={area} fill="url(#lc)" />
+        <path d={line} fill="none" stroke={color} strokeWidth="2" />
+        {pts.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r="2" fill={color} />)}
+        {data.map((d, i) => i % showEvery === 0 && (
+          <text key={i} x={pad + i * stepX} y={H + 12} textAnchor="middle" className="fill-slate-500" fontSize="9">{d.label}</text>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
 export function Toggle({ checked, onChange }) {
   return (
     <button

@@ -10,6 +10,7 @@ import Explore from './pages/Explore.jsx';
 import Editor from './pages/Editor.jsx';
 import BlueprintEditor from './pages/BlueprintEditor.jsx';
 import Admin from './pages/Admin.jsx';
+import ProjectPanel from './pages/ProjectPanel.jsx';
 
 // Protected route wrapper
 function ProtectedRoute({ children }) {
@@ -43,6 +44,7 @@ function AppRoutes() {
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/editor/:id" element={<ProtectedRoute><Editor /></ProtectedRoute>} />
       <Route path="/blueprint/:id" element={<ProtectedRoute><BlueprintEditor /></ProtectedRoute>} />
+      <Route path="/project/:id" element={<ProtectedRoute><ProjectPanel /></ProtectedRoute>} />
       <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
