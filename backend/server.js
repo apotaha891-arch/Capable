@@ -193,6 +193,21 @@ async function initDB() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_leads_project ON leads(project_id, created_at);
+
+      -- Lock down the public PostgREST API. The backend connects as the table
+      -- owner via DATABASE_URL and bypasses RLS, so it is unaffected. With RLS
+      -- enabled and no policies, the anon/authenticated roles (reachable with the
+      -- public anon key) can no longer read or write these tables directly.
+      ALTER TABLE users               ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE projects            ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE project_files       ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE token_usage         ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE transactions        ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE notifications       ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE campaigns           ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE campaign_recipients ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE page_events         ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE leads               ENABLE ROW LEVEL SECURITY;
     `);
 
     // Promote configured admin emails (no-op for emails not yet registered).
