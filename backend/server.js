@@ -418,14 +418,19 @@ async function initDB() {
 }
 
 // ── Hosted projects directory ─────────────────────────────────────────────────
-const hostedDir = path.join(__dirname, 'hosted');
+// Published sites + thumbnails. Set HOSTED_DIR to a mounted persistent volume in
+// production (e.g. Railway/Render disk) so published sites survive redeploys.
+const hostedDir = process.env.HOSTED_DIR || path.join(__dirname, 'hosted');
 if (!fs.existsSync(hostedDir)) fs.mkdirSync(hostedDir, { recursive: true });
 
 const thumbnailsDir = path.join(hostedDir, 'thumbnails');
 if (!fs.existsSync(thumbnailsDir)) fs.mkdirSync(thumbnailsDir, { recursive: true });
 
 // ── Middleware ────────────────────────────────────────────────────────────────
-app.use(cors());
+// CORS: open by default (auth is via Bearer token, not cookies). In production set
+// CORS_ORIGINS to a comma-separated allowlist, e.g. "https://capable.live".
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+app.use(cors(CORS_ORIGINS.length ? { origin: CORS_ORIGINS } : {}));
 
 // Stripe webhook needs the raw body for signature verification, so it is mounted
 // with express.raw BEFORE the global JSON parser. Fulfillment lives in
