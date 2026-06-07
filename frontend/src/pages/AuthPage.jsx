@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Sparkles, Mail, Lock, User, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useLang } from '../i18n/LangContext.jsx';
@@ -15,6 +15,8 @@ export default function AuthPage() {
   const { login, register } = useAuth();
   const { t, lang } = useLang();
   const navigate = useNavigate();
+  const location = useLocation();
+  const from = location.state?.from?.pathname || '/dashboard';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -27,7 +29,7 @@ export default function AuthPage() {
         if (password.length < 6) throw new Error(lang === 'ar' ? 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' : 'Password must be at least 6 characters');
         await register(email, name, password);
       }
-      navigate('/dashboard');
+      navigate(from, { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {

@@ -10,26 +10,50 @@ import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
 import CapableLogo from '../components/CapableLogo.jsx';
+import { API_BASE as API } from '../utils/api.js';
 
-const API = 'http://localhost:5000';
+// Users who ask for reduced motion get content revealed immediately, no animation.
+const prefersReducedMotion =
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// One IntersectionObserver drives every Reveal on the page rather than allocating
+// a fresh observer per element. Each observed node maps to its reveal callback.
+const revealCallbacks = new WeakMap();
+let sharedObserver = null;
+
+function getRevealObserver() {
+  if (sharedObserver) return sharedObserver;
+  sharedObserver = new IntersectionObserver(
+    (entries, observer) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const cb = revealCallbacks.get(entry.target);
+        if (cb) cb();
+        revealCallbacks.delete(entry.target);
+        observer.unobserve(entry.target);
+      }
+    },
+    { threshold: 0.15 }
+  );
+  return sharedObserver;
+}
 
 function useReveal() {
   const ref = useRef(null);
-  const [shown, setShown] = useState(false);
+  const [shown, setShown] = useState(prefersReducedMotion);
   useEffect(() => {
+    if (prefersReducedMotion) return;
     const el = ref.current;
     if (!el) return;
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setShown(true);
-          io.disconnect();
-        }
-      },
-      { threshold: 0.15 }
-    );
-    io.observe(el);
-    return () => io.disconnect();
+    const observer = getRevealObserver();
+    revealCallbacks.set(el, () => setShown(true));
+    observer.observe(el);
+    return () => {
+      revealCallbacks.delete(el);
+      observer.unobserve(el);
+    };
   }, []);
   return [ref, shown];
 }
@@ -257,7 +281,7 @@ export default function LandingPage() {
             <Link to="/dashboard" className="hidden sm:inline text-capable-text dark:text-slate-300 hover:text-capable-navy dark:hover:text-white transition-colors px-2">
               {t('dashboard')}
             </Link>
-            <Link to="/dashboard" className="btn-primary text-sm py-2.5 px-5">
+            <Link to="/builder" className="btn-primary text-sm py-2.5 px-5">
               {t('startBuilding')}
             </Link>
           </div>
@@ -300,7 +324,7 @@ export default function LandingPage() {
           <Reveal delay={240}>
             <div className="flex items-center gap-3 mb-10 flex-wrap justify-center">
               <Link
-                to="/dashboard"
+                to="/builder"
                 className="inline-flex items-center gap-2 bg-white text-capable-navy font-bold rounded-brand px-7 py-3.5 transition-colors hover:bg-capable-surface text-base dark:bg-indigo-600 dark:text-white dark:hover:bg-indigo-500 dark:shadow-[0_0_40px_rgba(79,70,229,0.4)]"
               >
                 {t('heroBtnPrimary')}
@@ -616,7 +640,7 @@ export default function LandingPage() {
             </Reveal>
             <Reveal delay={200}>
               <Link
-                to="/dashboard"
+                to="/builder"
                 className="inline-flex items-center gap-2 bg-white text-capable-navy font-bold rounded-brand px-8 py-4 transition-colors hover:bg-capable-surface text-base md:text-lg dark:shadow-[0_0_60px_rgba(255,255,255,0.2)]"
               >
                 {t('finalBtn')}

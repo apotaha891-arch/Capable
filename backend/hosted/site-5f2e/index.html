@@ -1,0 +1,5 @@
+
+<script>(function(){var S="site-5f2e",B="http://localhost:5000";
+try{fetch(B+'/api/track/'+S,{method:'POST',headers:{'Content-Type':'application/json'},keepalive:true,body:JSON.stringify({path:location.pathname,referrer:document.referrer})}).catch(function(){});}catch(e){}
+document.addEventListener('submit',function(e){var f=e.target;if(!f||f.tagName!=='FORM')return;var d={};try{new FormData(f).forEach(function(v,k){d[k]=v});}catch(_){}
+try{fetch(B+'/api/leads/'+S,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:location.pathname,fields:d})}).catch(function(){});}catch(e){}},true);})();</script>

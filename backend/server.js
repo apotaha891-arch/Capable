@@ -1,7 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import Stripe from 'stripe';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import Anthropic from '@anthropic-ai/sdk';
 import pkg from 'pg';
 const { Pool } = pkg;
 import bcrypt from 'bcryptjs';
@@ -14,7 +16,7 @@ import dns from 'dns/promises';
 import { generateBlueprint, getFallbackBlueprint, GenerationError } from './src/blueprint/generate.js';
 import { BlueprintSchema } from './src/blueprint/schema.js';
 import { activeProviderName } from './src/ai/provider.js';
-import { getUsage, secondsUntilMidnight } from './src/limits.js';
+import { getUsage, secondsUntilMidnight, monthlyTokenBudget, getMonthlyTokens, effectiveDeployLimit } from './src/limits.js';
 import { monthlySeries, currentMRR, forecast as buildForecast, cashPosition, recommendations as buildRecommendations } from './src/admin/finance.js';
 import { deliverCampaign, mailMode } from './src/admin/mailer.js';
 import { seedDemoFinance } from './src/admin/seedDemo.js';
@@ -33,6 +35,50 @@ const app = express();
 const port = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'capable_secret_change_in_production';
 
+// ── Stripe (Workstream B) ─────────────────────────────────────────────────────
+// Real payments. When STRIPE_SECRET_KEY is unset the routes fall back to the old
+// simulated behavior so local dev still works without keys.
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
+const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
+// Where Stripe Checkout returns the user after pay/cancel.
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+// Recurring plan → the lookup_key set on its Stripe Price. Create one Product +
+// monthly Price per plan in Stripe and set these exact lookup_keys on the Prices.
+const PLAN_PRICE_LOOKUP = {
+  influence: process.env.STRIPE_PRICE_INFLUENCE || 'capable_influence_monthly',
+  pro: process.env.STRIPE_PRICE_PRO || 'capable_pro_monthly',
+};
+// Extra deployable-project slot — a $5/mo recurring add-on (quantity = #slots).
+const DEPLOY_SLOT_PRICE_LOOKUP = process.env.STRIPE_PRICE_DEPLOY_SLOT || 'capable_deploy_slot_monthly';
+const PLAN_FALLBACK_AMOUNT = { influence: 19, pro: 49 }; // used only in simulated mode
+
+// Resolve a Price lookup_key → price id (cached). Lets us reference stable names
+// instead of generated price_… ids that change between Stripe environments.
+const _priceCache = new Map();
+async function resolvePriceId(lookupKey) {
+  if (_priceCache.has(lookupKey)) return _priceCache.get(lookupKey);
+  const prices = await stripe.prices.list({ lookup_keys: [lookupKey], active: true, limit: 1 });
+  const id = prices.data[0]?.id || null;
+  if (id) _priceCache.set(lookupKey, id);
+  return id;
+}
+
+// Get (or lazily create) the Stripe customer for a user, persisting the id.
+async function getOrCreateCustomer(userId) {
+  const { rows } = await pool.query('SELECT email, name, stripe_customer_id FROM users WHERE id = $1', [userId]);
+  const u = rows[0];
+  if (!u) throw new Error('User not found');
+  if (u.stripe_customer_id) return u.stripe_customer_id;
+  const customer = await stripe.customers.create({
+    email: u.email,
+    name: u.name || undefined,
+    metadata: { user_id: String(userId) },
+  });
+  await pool.query('UPDATE users SET stripe_customer_id = $1 WHERE id = $2', [customer.id, userId]);
+  return customer.id;
+}
+
 // ── Database ──────────────────────────────────────────────────────────────────
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -49,7 +95,7 @@ async function initDB() {
         password_hash TEXT NOT NULL,
         plan TEXT DEFAULT 'free',
         tokens_used INTEGER DEFAULT 0,
-        tokens_limit INTEGER DEFAULT 50000,
+        tokens_limit INTEGER DEFAULT 2000000,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -93,6 +139,27 @@ async function initDB() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
 
+      -- Dataset for a future in-house SLM: each row is a real generation plus the
+      -- reviewer's corrections, so the model can learn what good output looks like
+      -- and how mistakes get fixed.
+      CREATE TABLE IF NOT EXISTS training_samples (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id),
+        project_id INTEGER,
+        tier TEXT,
+        prompt TEXT,
+        output_code TEXT,
+        review_issues TEXT,
+        revised BOOLEAN DEFAULT false,
+        user_edit TEXT,
+        rating SMALLINT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- Raise the free token limit: update the column default and lift users still on the old 50k floor.
+      ALTER TABLE users ALTER COLUMN tokens_limit SET DEFAULT 2000000;
+      UPDATE users SET tokens_limit = 2000000 WHERE tokens_limit <= 50000;
+
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS domain_verified BOOLEAN DEFAULT false;
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS domain_verification_token TEXT;
       CREATE INDEX IF NOT EXISTS idx_projects_custom_domain ON projects(custom_domain) WHERE custom_domain IS NOT NULL;
@@ -103,6 +170,13 @@ async function initDB() {
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS og_image_url TEXT;
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
       CREATE INDEX IF NOT EXISTS idx_projects_published_slug ON projects(published_slug) WHERE published_slug IS NOT NULL;
+
+      -- Stripe billing (Workstream B)
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_deploy_slots INTEGER DEFAULT 0;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS deploy_slots_subscription_id TEXT;
+      CREATE INDEX IF NOT EXISTS idx_users_stripe_customer ON users(stripe_customer_id) WHERE stripe_customer_id IS NOT NULL;
 
       -- Admin & platform management
       ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user';
@@ -126,6 +200,49 @@ async function initDB() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_transactions_created ON transactions(created_at);
+      -- Stripe idempotency: one ledger row per Stripe object (invoice/session/charge).
+      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS stripe_ref TEXT;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_stripe_ref ON transactions(stripe_ref) WHERE stripe_ref IS NOT NULL;
+
+      -- Business model tables for Influence, commitments, and licensed assets.
+      CREATE TABLE IF NOT EXISTS commitments (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        description TEXT,
+        stake_amount NUMERIC(12,2) DEFAULT 0,
+        reward_amount NUMERIC(12,2) DEFAULT 0,
+        target_date DATE,
+        status TEXT DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS licensed_assets (
+        id SERIAL PRIMARY KEY,
+        slug TEXT UNIQUE NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        price INTEGER DEFAULT 0,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_licensed_assets_slug ON licensed_assets(slug);
+
+      -- Influence events (Workstream A): the conceptual core of the radical model —
+      -- "track influence events, not just transactions". Every monetizable action
+      -- and steering signal lands here; the resonance score is a weighted, decayed
+      -- aggregate of these rows (see GET /api/biz/resonance).
+      CREATE TABLE IF NOT EXISTS influence_events (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL,           -- observer_fee | commitment_stake | commitment_payout | meme_license | feature_vote | engagement | referral
+        weight NUMERIC(12,4) DEFAULT 1,
+        target TEXT,                        -- what was influenced (plan, commitment id, asset slug, feature key)
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_influence_events_user ON influence_events(user_id, created_at);
 
       -- In-app notifications (CRM → customers)
       CREATE TABLE IF NOT EXISTS notifications (
@@ -208,6 +325,8 @@ async function initDB() {
       ALTER TABLE campaign_recipients ENABLE ROW LEVEL SECURITY;
       ALTER TABLE page_events         ENABLE ROW LEVEL SECURITY;
       ALTER TABLE leads               ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE influence_events    ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE training_samples    ENABLE ROW LEVEL SECURITY;
     `);
 
     // Promote configured admin emails (no-op for emails not yet registered).
@@ -219,6 +338,18 @@ async function initDB() {
     }
 
     await seedDemoFinance(pool);
+
+    const { rows: existingAssets } = await pool.query('SELECT id FROM licensed_assets LIMIT 1');
+    if (existingAssets.length === 0) {
+      await pool.query(
+        `INSERT INTO licensed_assets (slug, title, description, price, metadata) VALUES
+          ('launch-ritual', 'Launch Ritual Bundle', 'A proven step-by-step launch flow designed to turn a template into a revenue-ready site.', 49, '{"type": "bundle", "theme": "growth"}'),
+          ('partner-playbook', 'Partner Growth Playbook', 'A reusable partner onboarding workflow and promotion checklist to extend your network effect.', 79, '{"type": "playbook", "theme": "partners"}'),
+          ('commitment-canvas', 'Commitment Canvas', 'A structural goal-setting template for converting behavior into predictable business results.', 29, '{"type": "template", "theme": "behavior"}')
+        `
+      );
+    }
+
     console.log('✅ Database schema initialized');
   } catch (err) {
     console.error('❌ Database schema initialization failed', err);
@@ -234,6 +365,28 @@ if (!fs.existsSync(thumbnailsDir)) fs.mkdirSync(thumbnailsDir, { recursive: true
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 app.use(cors());
+
+// Stripe webhook needs the raw body for signature verification, so it is mounted
+// with express.raw BEFORE the global JSON parser. Fulfillment lives in
+// handleStripeEvent (defined with the business-model routes).
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!stripe || !STRIPE_WEBHOOK_SECRET) return res.status(503).json({ error: 'Stripe not configured' });
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, req.headers['stripe-signature'], STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error('Stripe webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+  try {
+    await handleStripeEvent(event);
+  } catch (err) {
+    console.error(`Stripe event ${event.type} handling failed:`, err.message);
+    return res.status(500).json({ error: 'Webhook handler failed' });
+  }
+  res.json({ received: true });
+});
+
 app.use(express.json({ limit: '10mb' }));
 
 // Host-based routing for verified custom domains. Skipped on localhost and for API/hosted/uploads paths.
@@ -349,6 +502,86 @@ async function adminMiddleware(req, res, next) {
 }
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+// Anthropic client for the Builder (single-file site generation). Lazily
+// constructed so a missing ANTHROPIC_API_KEY doesn't crash boot — the route
+// returns a clear 503 until the key is configured. Model is overridable via env.
+const CLAUDE_MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-4-8';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+const SONNET_MODEL = process.env.SONNET_MODEL || 'claude-sonnet-4-6';
+const OPUS_MODEL   = process.env.OPUS_MODEL   || 'claude-opus-4-8';
+
+// Open-weight generator via any OpenAI-compatible endpoint (DeepSeek direct, or
+// OpenRouter/Together/Fireworks/self-hosted vLLM). DeepSeek V3.2 gives near-frontier
+// code quality at an open-weight cost floor (~$0.28/$0.42 per 1M in/out) — far below
+// Gemini's $2.50 output. When OSS_API_KEY is set, the generator uses it; otherwise we
+// fall back to Gemini, so this is a safe, opt-in cost cut.
+// Open-weight generator key. Prefer an explicit OSS/DeepSeek key; otherwise reuse
+// the existing Groq key (gsk_…) so Capable 1 runs on an open-weight model (Llama
+// 3.3 70B) via Groq's OpenAI-compatible endpoint instead of falling back to Gemini.
+const OSS_API_KEY  = process.env.OSS_API_KEY || process.env.DEEPSEEK_API_KEY || process.env.GROQ_API_KEY || '';
+const USING_GROQ   = !process.env.OSS_API_KEY && !process.env.DEEPSEEK_API_KEY && !!process.env.GROQ_API_KEY;
+const OSS_BASE_URL = process.env.OSS_BASE_URL || (USING_GROQ ? 'https://api.groq.com/openai' : 'https://api.deepseek.com');
+const OSS_MODEL    = process.env.OSS_MODEL || (USING_GROQ ? (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile') : 'deepseek-chat');
+let _anthropic = null;
+
+// Capable Builder model tiers. The user picks one per generation. Higher tiers
+// produce better output but burn more tokens, so callers should surface tighter
+// limits + an upgrade/downgrade choice on the expensive ones.
+//   capable1 — Gemini generates, Sonnet reviews   (cheapest, default)
+//   capable2 — Gemini generates, Opus reviews      (stronger review)
+//   capable3 — Sonnet generates, Opus reviews      (best quality, costly)
+// Default generator for the cheaper tiers: the open-weight model when keyed (big
+// cost saving), else Gemini. The reviewer stays a strong model so quality holds.
+const GEMINI_GENERATOR = { provider: 'gemini', model: GEMINI_MODEL };
+const OSS_GENERATOR = OSS_API_KEY
+  ? { provider: 'openai', model: OSS_MODEL }
+  : GEMINI_GENERATOR;
+const BUILDER_TIERS = {
+  capable1: { generator: OSS_GENERATOR, reviewer: { provider: 'anthropic', model: SONNET_MODEL } },
+  capable2: { generator: OSS_GENERATOR, reviewer: { provider: 'anthropic', model: OPUS_MODEL } },
+  capable3: { generator: { provider: 'anthropic', model: SONNET_MODEL }, reviewer: { provider: 'anthropic', model: OPUS_MODEL } },
+};
+const DEFAULT_TIER = 'capable1';
+
+// Generating a full site from scratch needs more quality than open-weight models
+// (Llama via Groq) reliably give in one shot — and a weak generator triggers more
+// costly review/revise loops. So INITIAL generation upgrades an open-weight
+// generator to Gemini, while EDITOR edits keep the open-weight model (the surgical
+// edit is small, and the strong reviewer still guards quality).
+const initialGenerator = (gen) => (gen.provider === 'openai' ? GEMINI_GENERATOR : gen);
+
+// Per-tier token budgets: every tier is available to every user, but the pricier
+// tiers get a tighter cap. When a user exhausts a tier they downgrade to a cheaper
+// one or upgrade their plan. Overridable via env.
+const TIER_LIMITS = {
+  capable1: parseInt(process.env.TIER1_LIMIT || '2000000'),
+  capable2: parseInt(process.env.TIER2_LIMIT || '500000'),
+  capable3: parseInt(process.env.TIER3_LIMIT || '150000'),
+};
+
+// Model pricing in USD per 1,000,000 tokens, used to compute the exact cost of
+// each logged operation. tokens_in already folds in cache tokens (see the chat
+// route), so input cost is an upper bound — real cache reads are cheaper.
+const MODEL_PRICING = {
+  'claude-opus-4-8':     { in: 5.0,   out: 25.0 },
+  'claude-sonnet-4-6':   { in: 3.0,   out: 15.0 },
+  'gemini-flash-latest': { in: 0.30,  out: 2.50 },
+  'deepseek-chat':       { in: 0.28,  out: 0.42 },
+  'llama-3.3-70b-versatile': { in: 0.59, out: 0.79 },
+};
+const DEFAULT_PRICING = { in: 0, out: 0 };
+
+// Cost in USD for one operation given its in/out token counts and model name.
+function costUsd(model, tokensIn, tokensOut) {
+  const p = MODEL_PRICING[model] || DEFAULT_PRICING;
+  return ((tokensIn || 0) * p.in + (tokensOut || 0) * p.out) / 1_000_000;
+}
+function getAnthropic() {
+  if (!process.env.ANTHROPIC_API_KEY) return null;
+  if (!_anthropic) _anthropic = new Anthropic();
+  return _anthropic;
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // AUTH ROUTES
@@ -559,6 +792,34 @@ app.post('/api/projects/:id/thumbnail', authMiddleware, async (req, res) => {
   }
 });
 
+// POST /api/projects/:id/og-image — upload the social-share image from the user's
+// computer (base64 data URL) so non-technical users don't need to host a URL.
+app.post('/api/projects/:id/og-image', authMiddleware, async (req, res) => {
+  try {
+    const { image } = req.body;
+    const { rows } = await pool.query('SELECT id FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Project not found' });
+
+    if (!image || !image.startsWith('data:image/')) {
+      return res.status(400).json({ error: 'Invalid image data' });
+    }
+
+    const ext = (image.match(/^data:image\/(\w+);base64,/)?.[1] || 'jpg').replace('jpeg', 'jpg');
+    const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+    const filename = `og_${req.params.id}_${Date.now()}.${ext}`;
+    fs.writeFileSync(path.join(thumbnailsDir, filename), buffer);
+
+    const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
+    const url = `${baseUrl}/hosted/thumbnails/${filename}`;
+
+    await pool.query('UPDATE projects SET og_image_url = $1 WHERE id = $2', [url, req.params.id]);
+    res.json({ success: true, url });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save image', details: err.message });
+  }
+});
+
 // DELETE /api/projects/:id
 app.delete('/api/projects/:id', authMiddleware, async (req, res) => {
   try {
@@ -579,6 +840,18 @@ app.post('/api/projects/:id/publish', authMiddleware, async (req, res) => {
     const { rows } = await pool.query('SELECT * FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
     const project = rows[0];
     if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    // Deploy-slot guard: publishing a not-yet-published project consumes a slot.
+    if (!project.is_published) {
+      const { rows: u } = await pool.query('SELECT plan, extra_deploy_slots FROM users WHERE id = $1', [req.user.id]);
+      const limit = effectiveDeployLimit(u[0].plan, u[0].extra_deploy_slots);
+      if (Number.isFinite(limit)) {
+        const { rows: c } = await pool.query('SELECT COUNT(*)::int AS n FROM projects WHERE user_id = $1 AND is_published = true', [req.user.id]);
+        if (c[0].n >= limit) {
+          return res.status(402).json({ error: 'deploy_limit_reached', deploys_count: c[0].n, deploys_limit: limit, plan: u[0].plan });
+        }
+      }
+    }
 
     const slug = project.published_slug || `p-${req.params.id}-${Date.now().toString(36)}`;
     const projectDir = path.join(hostedDir, slug);
@@ -610,6 +883,397 @@ app.post('/api/projects/:id/unpublish', authMiddleware, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to unpublish', details: err.message });
+  }
+});
+
+// POST /api/projects/:id/convert-to-code — PAID: snapshot a blueprint project's
+// rendered HTML (sent by the client) as editable `code` so it opens in the code
+// editor (المحرر). Only fills `code` when empty, so it never clobbers later edits.
+app.post('/api/projects/:id/convert-to-code', authMiddleware, async (req, res) => {
+  try {
+    const { rows: u } = await pool.query('SELECT plan FROM users WHERE id = $1', [req.user.id]);
+    if (!['influence', 'pro', 'enterprise'].includes(u[0]?.plan)) {
+      return res.status(403).json({ error: 'upgrade_required', message: 'Opening a blueprint project in the code editor is a paid feature.' });
+    }
+    const { rows } = await pool.query('SELECT id, code FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    const project = rows[0];
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    if (project.code && project.code.trim()) return res.json({ success: true, alreadyCode: true });
+
+    const { code } = req.body || {};
+    if (!code || typeof code !== 'string' || code.length < 50) {
+      return res.status(400).json({ error: 'Rendered code is required' });
+    }
+    await pool.query('UPDATE projects SET code = $1, updated_at = NOW() WHERE id = $2', [code, project.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to convert', details: err.message });
+  }
+});
+
+// ── Business model routes ───────────────────────────────────────────────────
+
+// Influence-event weights (Workstream A). Tunable; higher = stronger pull on a
+// user's resonance score, which downstream voting/experiments/adaptive pricing read.
+const INFLUENCE_WEIGHTS = {
+  observer_fee: 10,        // paying for the resonance pass
+  commitment_payout: 8,    // converting staked behavior into achievement
+  meme_license: 6,         // adopting / propagating a memetic module
+  commitment_stake: 5,     // locking value into a behavioral vault
+  referral: 4,             // propagating the brand
+  feature_vote: 3,         // steering the roadmap
+  engagement: 1,           // passive participation
+};
+
+// Event types a user may emit directly via POST /api/biz/influence. Money-bearing
+// events (observer_fee, commitment_*, meme_license) are emitted server-side only.
+const USER_INFLUENCE_TYPES = new Set(['feature_vote', 'engagement', 'referral']);
+
+// Record one influence event. Never throws into callers — influence tracking must
+// not break a paid action. Weight defaults to the type's tuned weight.
+async function recordInfluence(userId, eventType, { target = null, weight, metadata = {} } = {}) {
+  if (!userId) return;
+  const w = weight ?? INFLUENCE_WEIGHTS[eventType] ?? 1;
+  try {
+    await pool.query(
+      `INSERT INTO influence_events (user_id, event_type, weight, target, metadata)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [userId, eventType, w, target, JSON.stringify(metadata)]
+    );
+  } catch (err) {
+    console.error('recordInfluence failed:', err.message);
+  }
+}
+
+// Insert a ledger row keyed by a Stripe object id (idempotent — duplicate webhook
+// deliveries won't double-count). Returns true only when a new row is written.
+async function recordStripeTransaction({ userId, type, amount, status = 'paid', description, plan = null, stripeRef = null }) {
+  if (stripeRef) {
+    const { rows } = await pool.query('SELECT 1 FROM transactions WHERE stripe_ref = $1 LIMIT 1', [stripeRef]);
+    if (rows.length) return false;
+  }
+  await pool.query(
+    `INSERT INTO transactions (user_id, type, amount, status, description, plan, stripe_ref)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (stripe_ref) DO NOTHING`,
+    [userId, type, amount, status, description, plan, stripeRef]
+  );
+  return true;
+}
+
+async function userIdForCustomer(customerId) {
+  if (!customerId) return null;
+  const { rows } = await pool.query('SELECT id FROM users WHERE stripe_customer_id = $1 LIMIT 1', [customerId]);
+  return rows[0]?.id || null;
+}
+
+// Central Stripe event fulfillment. Plans/grants are applied ONLY here, after
+// Stripe confirms the money actually moved. Called from the webhook route.
+async function handleStripeEvent(event) {
+  const obj = event.data.object;
+  switch (event.type) {
+    case 'checkout.session.completed': {
+      const userId = parseInt(obj.metadata?.user_id || obj.client_reference_id || '', 10) || null;
+      if (!userId) break;
+      if (obj.mode === 'subscription' && obj.metadata?.kind === 'deploy_slots') {
+        // Extra deployable slots — set the count from the subscription quantity.
+        const sub = obj.subscription ? await stripe.subscriptions.retrieve(obj.subscription) : null;
+        const qty = sub?.items?.data?.[0]?.quantity || 0;
+        await pool.query('UPDATE users SET extra_deploy_slots = $1, deploy_slots_subscription_id = $2 WHERE id = $3',
+          [qty, obj.subscription || null, userId]);
+      } else if (obj.mode === 'subscription') {
+        const plan = obj.metadata?.plan;
+        if (plan) {
+          await pool.query('UPDATE users SET plan = $1, stripe_subscription_id = $2 WHERE id = $3',
+            [plan, obj.subscription || null, userId]);
+        }
+        // The first invoice is booked by invoice.paid; here we record the influence.
+        await recordInfluence(userId, 'observer_fee', { target: plan, metadata: { amount: (obj.amount_total || 0) / 100, source: 'checkout' } });
+      } else if (obj.mode === 'payment' && obj.metadata?.kind === 'meme_license') {
+        const amount = (obj.amount_total || 0) / 100;
+        const wrote = await recordStripeTransaction({
+          userId, type: 'template_sale', amount,
+          description: `Licensed asset: ${obj.metadata.asset_slug}`, stripeRef: obj.id,
+        });
+        if (wrote) await recordInfluence(userId, 'meme_license', { target: obj.metadata.asset_slug, metadata: { asset_id: obj.metadata.asset_id, price: amount } });
+      }
+      break;
+    }
+    case 'invoice.paid': {
+      const userId = await userIdForCustomer(obj.customer);
+      if (!userId) break;
+      const amount = (obj.amount_paid || 0) / 100;
+      const { rows } = await pool.query('SELECT plan, deploy_slots_subscription_id FROM users WHERE id = $1', [userId]);
+      const plan = rows[0]?.plan || null;
+      const isSlots = obj.subscription && rows[0]?.deploy_slots_subscription_id === obj.subscription;
+      const wrote = await recordStripeTransaction({
+        userId, type: 'subscription', amount,
+        description: isSlots ? 'Deploy slots payment' : `Subscription payment (${plan || 'plan'})`,
+        plan: isSlots ? null : plan, stripeRef: obj.id,
+      });
+      // Each successful PLAN renewal is an ongoing observer-fee influence signal
+      // (slot renewals are not an influence event).
+      if (wrote && !isSlots && obj.billing_reason === 'subscription_cycle') {
+        await recordInfluence(userId, 'observer_fee', { target: plan, metadata: { amount, source: 'renewal' } });
+      }
+      break;
+    }
+    case 'invoice.payment_failed': {
+      const userId = await userIdForCustomer(obj.customer);
+      if (!userId) break;
+      await recordStripeTransaction({
+        userId, type: 'subscription', amount: (obj.amount_due || 0) / 100, status: 'pending',
+        description: 'Subscription payment failed', stripeRef: `${obj.id}:failed`,
+      });
+      // Stripe retries per dunning settings; customer.subscription.deleted handles final loss.
+      break;
+    }
+    case 'customer.subscription.updated': {
+      // Keep extra deploy slots in sync when the user changes quantity in the portal.
+      if (obj.metadata?.kind === 'deploy_slots') {
+        const userId = await userIdForCustomer(obj.customer);
+        if (!userId) break;
+        const qty = obj.items?.data?.[0]?.quantity || 0;
+        await pool.query('UPDATE users SET extra_deploy_slots = $1 WHERE id = $2', [qty, userId]);
+      }
+      break;
+    }
+    case 'customer.subscription.deleted': {
+      const userId = await userIdForCustomer(obj.customer);
+      if (!userId) break;
+      if (obj.metadata?.kind === 'deploy_slots') {
+        await pool.query('UPDATE users SET extra_deploy_slots = 0, deploy_slots_subscription_id = NULL WHERE id = $1', [userId]);
+      } else {
+        await pool.query("UPDATE users SET plan = 'free', stripe_subscription_id = NULL WHERE id = $1", [userId]);
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+// GET /api/biz/assets
+app.get('/api/biz/assets', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT id, slug, title, description, price, metadata FROM licensed_assets ORDER BY created_at DESC');
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load marketplace assets', details: err.message });
+  }
+});
+
+// POST /api/biz/assets/:id/buy
+app.post('/api/biz/assets/:id/buy', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT id, slug, title, price FROM licensed_assets WHERE id = $1', [req.params.id]);
+    const asset = rows[0];
+    if (!asset) return res.status(404).json({ error: 'Asset not found' });
+
+    // Free asset or simulated mode: grant immediately.
+    if (!stripe || !asset.price || asset.price <= 0) {
+      await pool.query(
+        'INSERT INTO transactions (user_id, type, amount, status, description, project_id) VALUES ($1, $2, $3, $4, $5, NULL)',
+        [req.user.id, 'template_sale', asset.price || 0, 'paid', `Purchased licensed asset: ${asset.title}${stripe ? '' : ' (simulated)'}`]
+      );
+      await recordInfluence(req.user.id, 'meme_license', { target: asset.slug, metadata: { asset_id: asset.id, price: asset.price || 0 } });
+      return res.json({ success: true, asset });
+    }
+
+    const customer = await getOrCreateCustomer(req.user.id);
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      customer,
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: 'usd',
+          unit_amount: Math.round(asset.price * 100),
+          product_data: { name: asset.title, metadata: { asset_slug: asset.slug } },
+        },
+      }],
+      client_reference_id: String(req.user.id),
+      metadata: { user_id: String(req.user.id), kind: 'meme_license', asset_id: String(asset.id), asset_slug: asset.slug },
+      success_url: `${FRONTEND_URL}/marketplace?checkout=success`,
+      cancel_url: `${FRONTEND_URL}/marketplace?checkout=cancel`,
+    });
+    res.json({ url: session.url });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to buy asset', details: err.message });
+  }
+});
+
+// POST /api/biz/subscribe — start a recurring subscription. With Stripe configured
+// this returns a Checkout URL; the plan is only applied once the webhook confirms
+// payment. Without Stripe it falls back to the simulated instant upgrade.
+app.post('/api/biz/subscribe', authMiddleware, async (req, res) => {
+  try {
+    const { plan } = req.body;
+    if (!PLAN_PRICE_LOOKUP[plan]) {
+      return res.status(400).json({ error: 'Invalid plan selected', allowed: Object.keys(PLAN_PRICE_LOOKUP) });
+    }
+
+    // Simulated mode (no Stripe keys): keep dev working.
+    if (!stripe) {
+      const amount = PLAN_FALLBACK_AMOUNT[plan] || 0;
+      await pool.query('UPDATE users SET plan = $1 WHERE id = $2', [plan, req.user.id]);
+      await pool.query(
+        'INSERT INTO transactions (user_id, type, amount, status, description, plan) VALUES ($1, $2, $3, $4, $5, $6)',
+        [req.user.id, 'subscription', amount, 'paid', `Subscribed to ${plan} (simulated)`, plan]
+      );
+      await recordInfluence(req.user.id, 'observer_fee', { target: plan, metadata: { amount, simulated: true } });
+      return res.json({ success: true, plan, simulated: true });
+    }
+
+    const priceId = await resolvePriceId(PLAN_PRICE_LOOKUP[plan]);
+    if (!priceId) {
+      return res.status(500).json({ error: `No active Stripe Price with lookup_key "${PLAN_PRICE_LOOKUP[plan]}"` });
+    }
+    const customer = await getOrCreateCustomer(req.user.id);
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      customer,
+      line_items: [{ price: priceId, quantity: 1 }],
+      client_reference_id: String(req.user.id),
+      metadata: { user_id: String(req.user.id), plan },
+      subscription_data: { metadata: { user_id: String(req.user.id), plan } },
+      success_url: `${FRONTEND_URL}/influence?checkout=success`,
+      cancel_url: `${FRONTEND_URL}/influence?checkout=cancel`,
+    });
+    res.json({ url: session.url });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to start subscription', details: err.message });
+  }
+});
+
+// POST /api/biz/portal — open the Stripe billing portal (manage / cancel / invoices).
+app.post('/api/biz/portal', authMiddleware, async (req, res) => {
+  try {
+    if (!stripe) return res.status(503).json({ error: 'Billing portal unavailable (Stripe not configured)' });
+    const customer = await getOrCreateCustomer(req.user.id);
+    const session = await stripe.billingPortal.sessions.create({
+      customer,
+      return_url: `${FRONTEND_URL}/influence`,
+    });
+    res.json({ url: session.url });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to open billing portal', details: err.message });
+  }
+});
+
+// POST /api/biz/deploy-slots — buy N extra deployable-project slots ($5/mo each,
+// adjustable later in the billing portal). Fulfilled by the webhook.
+app.post('/api/biz/deploy-slots', authMiddleware, async (req, res) => {
+  try {
+    if (!stripe) return res.status(503).json({ error: 'Deploy slots require Stripe to be configured' });
+    const qty = Math.max(1, Math.min(parseInt(req.body?.quantity, 10) || 1, 100));
+    const priceId = await resolvePriceId(DEPLOY_SLOT_PRICE_LOOKUP);
+    if (!priceId) return res.status(500).json({ error: `No active Stripe Price with lookup_key "${DEPLOY_SLOT_PRICE_LOOKUP}"` });
+    const customer = await getOrCreateCustomer(req.user.id);
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      customer,
+      line_items: [{ price: priceId, quantity: qty, adjustable_quantity: { enabled: true, minimum: 1, maximum: 100 } }],
+      client_reference_id: String(req.user.id),
+      metadata: { user_id: String(req.user.id), kind: 'deploy_slots' },
+      subscription_data: { metadata: { user_id: String(req.user.id), kind: 'deploy_slots' } },
+      success_url: `${FRONTEND_URL}/dashboard?checkout=slots_success`,
+      cancel_url: `${FRONTEND_URL}/dashboard?checkout=cancel`,
+    });
+    res.json({ url: session.url });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to start deploy-slot purchase', details: err.message });
+  }
+});
+
+// GET /api/biz/commitments
+app.get('/api/biz/commitments', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, title, description, stake_amount, reward_amount, target_date, status, created_at, completed_at
+       FROM commitments WHERE user_id = $1 ORDER BY created_at DESC`,
+      [req.user.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load commitments', details: err.message });
+  }
+});
+
+// POST /api/biz/commitments
+app.post('/api/biz/commitments', authMiddleware, async (req, res) => {
+  try {
+    const { title, description, stake_amount, reward_amount, target_date } = req.body;
+    if (!title || !target_date) return res.status(400).json({ error: 'Title and target date are required' });
+    const { rows } = await pool.query(
+      `INSERT INTO commitments (user_id, title, description, stake_amount, reward_amount, target_date)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, title, description, stake_amount, reward_amount, target_date, status, created_at, completed_at`,
+      [req.user.id, title, description, stake_amount || 0, reward_amount || 0, target_date]
+    );
+    await recordInfluence(req.user.id, 'commitment_stake', { target: String(rows[0].id), metadata: { stake_amount: stake_amount || 0 } });
+    res.status(201).json({ commitment: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create commitment', details: err.message });
+  }
+});
+
+// POST /api/biz/commitments/:id/complete
+app.post('/api/biz/commitments/:id/complete', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT id, status, reward_amount FROM commitments WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    const commitment = rows[0];
+    if (!commitment) return res.status(404).json({ error: 'Commitment not found' });
+    if (commitment.status !== 'active') return res.status(400).json({ error: 'Commitment already completed' });
+
+    await pool.query('UPDATE commitments SET status = $1, completed_at = NOW() WHERE id = $2', ['completed', req.params.id]);
+    await pool.query('INSERT INTO transactions (user_id, type, amount, status, description) VALUES ($1, $2, $3, $4, $5)',
+      [req.user.id, 'subscription', commitment.reward_amount, 'paid', `Completed commitment reward`]
+    );
+    await recordInfluence(req.user.id, 'commitment_payout', { target: String(commitment.id), metadata: { reward_amount: commitment.reward_amount } });
+
+    res.json({ success: true, completed_at: new Date().toISOString() });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to complete commitment', details: err.message });
+  }
+});
+
+// POST /api/biz/influence — record a user-initiated influence event (feature vote,
+// engagement, referral). Money-bearing events are emitted server-side by their own
+// routes and cannot be set here.
+app.post('/api/biz/influence', authMiddleware, async (req, res) => {
+  try {
+    const { event_type, target, metadata } = req.body || {};
+    if (!USER_INFLUENCE_TYPES.has(event_type)) {
+      return res.status(400).json({ error: 'Invalid influence event type' });
+    }
+    await recordInfluence(req.user.id, event_type, { target: target || null, metadata: metadata || {} });
+    res.status(201).json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to record influence', details: err.message });
+  }
+});
+
+// GET /api/biz/resonance — the user's live resonance score: a 30-day half-life
+// weighted aggregate of their influence events. Higher resonance = stronger pull on
+// feature voting, experiments, and adaptive pricing (downstream workstreams).
+app.get('/api/biz/resonance', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT
+         COALESCE(SUM(weight * power(0.5, EXTRACT(EPOCH FROM (now() - created_at)) / (86400 * 30))), 0)::numeric(12,2) AS score,
+         COUNT(*)::int AS events,
+         COALESCE(SUM(weight), 0)::numeric(12,2) AS lifetime_weight,
+         MAX(created_at) AS last_event_at
+       FROM influence_events WHERE user_id = $1`,
+      [req.user.id]
+    );
+    const { rows: breakdown } = await pool.query(
+      `SELECT event_type, COUNT(*)::int AS count, COALESCE(SUM(weight), 0)::numeric(12,2) AS weight
+       FROM influence_events WHERE user_id = $1 GROUP BY event_type ORDER BY weight DESC`,
+      [req.user.id]
+    );
+    res.json({ ...rows[0], breakdown });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load resonance', details: err.message });
   }
 });
 
@@ -847,7 +1511,7 @@ app.post('/api/blueprint/generate', authMiddleware, async (req, res) => {
 
     // Tier rate limiting (spec §6)
     const quota = await getUsage(pool, req.user.id, user.plan);
-    if (quota.generations_today >= quota.generations_limit) {
+    if (quota.generations_limit != null && quota.generations_today >= quota.generations_limit) {
       res.set('Retry-After', String(secondsUntilMidnight()));
       return res.status(429).json({
         error: 'Daily generation limit reached',
@@ -863,6 +1527,23 @@ app.post('/api/blueprint/generate', authMiddleware, async (req, res) => {
         ...quota,
         upgrade_required: user.plan === 'free',
       });
+    }
+
+    // Deploy-slot guard — this route also publishes, so a new deploy consumes a slot.
+    {
+      const { rows: u } = await pool.query('SELECT plan, extra_deploy_slots FROM users WHERE id = $1', [req.user.id]);
+      const limit = effectiveDeployLimit(u[0].plan, u[0].extra_deploy_slots);
+      if (Number.isFinite(limit)) {
+        const alreadyPublished = project_id
+          ? (await pool.query('SELECT is_published FROM projects WHERE id = $1 AND user_id = $2', [project_id, req.user.id])).rows[0]?.is_published
+          : false;
+        if (!alreadyPublished) {
+          const { rows: c } = await pool.query('SELECT COUNT(*)::int AS n FROM projects WHERE user_id = $1 AND is_published = true', [req.user.id]);
+          if (c[0].n >= limit) {
+            return res.status(402).json({ error: 'deploy_limit_reached', deploys_count: c[0].n, deploys_limit: limit, plan: u[0].plan });
+          }
+        }
+      }
     }
 
     let blueprint, usage;
@@ -968,8 +1649,8 @@ app.get('/api/render/:slug', async (req, res) => {
 // GET /api/blueprint/quota — current tier usage for the dashboard
 app.get('/api/blueprint/quota', authMiddleware, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT plan FROM users WHERE id = $1', [req.user.id]);
-    res.json(await getUsage(pool, req.user.id, rows[0]?.plan));
+    const { rows } = await pool.query('SELECT plan, extra_deploy_slots FROM users WHERE id = $1', [req.user.id]);
+    res.json(await getUsage(pool, req.user.id, rows[0]?.plan, rows[0]?.extra_deploy_slots));
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
   }
@@ -992,23 +1673,315 @@ app.post('/api/generate', authMiddleware, async (req, res) => {
   const { prompt, history, project_id } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Prompt is required' });
 
+  // Tier selection (capable1/2/3) — same engine as the Builder, multi-file output.
+  const tier = BUILDER_TIERS[req.body.tier] ? req.body.tier : DEFAULT_TIER;
+  const tierCfg = BUILDER_TIERS[tier];
+  const reviewEnabled = process.env.BUILDER_REVIEW !== 'off';
+  const anthropic = getAnthropic();
+  if (!anthropic && (reviewEnabled || tierCfg.generator.provider === 'anthropic')) {
+    return res.status(503).json({ error: 'ai_unavailable', details: 'ANTHROPIC_API_KEY is not configured on the server' });
+  }
+
   try {
     const { rows: userRows } = await pool.query('SELECT tokens_used, tokens_limit, plan FROM users WHERE id = $1', [req.user.id]);
     const user = userRows[0];
-    
-    if (user.tokens_used >= user.tokens_limit) {
+
+    const monthlyBudget = monthlyTokenBudget(user.plan);
+    const monthlyUsed = Number.isFinite(monthlyBudget) ? await getMonthlyTokens(pool, req.user.id) : 0;
+    if (Number.isFinite(monthlyBudget) && monthlyUsed >= monthlyBudget) {
       return res.status(429).json({
         error: 'Token limit reached',
-        tokens_used: user.tokens_used,
-        tokens_limit: user.tokens_limit,
+        reason: 'monthly_tokens',
+        monthly_tokens_used: monthlyUsed,
+        monthly_tokens_limit: monthlyBudget,
         plan: user.plan,
         upgrade_required: true,
       });
     }
 
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-flash-latest',
-      systemInstruction: `You are an expert web developer. Your ONLY job is to output a valid JSON object containing the files for a web project.
+    // Per-tier budget gate — pricier tiers run out sooner (downgrade or upgrade).
+    const tierLimit = TIER_LIMITS[tier];
+    if (tierLimit) {
+      const { rows: tu } = await pool.query(
+        `SELECT COALESCE(SUM(tokens_in + tokens_out), 0)::bigint AS used
+           FROM token_usage WHERE user_id = $1 AND action LIKE $2`,
+        [req.user.id, `%:${tier}`]
+      );
+      if (Number(tu[0].used) >= tierLimit) {
+        return res.status(402).json({
+          error: 'tier_limit_reached',
+          tier, tier_used: Number(tu[0].used), tier_limit: tierLimit,
+          can_downgrade: tier !== DEFAULT_TIER, upgrade_required: true,
+        });
+      }
+    }
+
+    const usageLog = [];
+    const logStep = (model, action, usage) => usageLog.push({ model, action, ...usage });
+
+    // Editing an existing project — load its current files so the generator
+    // MODIFIES the site instead of inventing a new one. Without this, a request
+    // like "pin the top nav" arrives with no context and the model builds a
+    // brand-new site from scratch. Ownership-scoped to the requesting user.
+    let existingFiles = [];
+    let editContext = [];
+    if (project_id) {
+      const { rows } = await pool.query(
+        `SELECT pf.filename, pf.content
+           FROM project_files pf
+           JOIN projects p ON p.id = pf.project_id
+          WHERE pf.project_id = $1 AND p.user_id = $2
+          ORDER BY pf.filename`,
+        [project_id, req.user.id]
+      );
+      existingFiles = rows;
+      if (existingFiles.length) {
+        editContext = [{
+          prompt: 'This is the current project I am editing. Apply the change in my next message to THIS project, then return ONLY the files you actually change or add (each with full content) as {"files":[...]}. Do NOT return files you did not touch. Preserve everything else exactly; do not create a new site or change the business/content unless explicitly asked.',
+          code: JSON.stringify({ files: existingFiles }),
+        }];
+      }
+    }
+    // Current project state first, then this session's edit history.
+    const effectiveHistory = [...editContext, ...(history || [])];
+
+    // Merge surgical edits over the existing project so untouched files survive
+    // byte-for-byte (no drift/regression) while only changed files are re-emitted.
+    const mergeFiles = (base, changes) => {
+      const map = new Map(base.map(f => [f.filename, { filename: f.filename, content: f.content }]));
+      for (const cf of changes) {
+        if (cf && cf.filename && typeof cf.content === 'string') map.set(cf.filename, { filename: cf.filename, content: cf.content });
+      }
+      return [...map.values()];
+    };
+
+    // Editor edits run on the open-weight generator (cheap, surgical). Building a
+    // site from scratch (no existing files) upgrades to Gemini for quality.
+    const generator = existingFiles.length ? tierCfg.generator : initialGenerator(tierCfg.generator);
+
+    // Step 1 — the generator writes ONLY the changed/new files; we merge them over
+    // the current project. For a brand-new project there is nothing to merge, so
+    // the generator's output is the whole site.
+    let { files: changedFiles, usage: genUsage } = await generateFiles(anthropic, generator, effectiveHistory, prompt);
+    logStep(generator.model, `generate:${tier}`, genUsage);
+    if (!changedFiles.length) {
+      return res.status(502).json({ error: 'Failed to generate', details: 'The generator response could not be parsed. Please try again.' });
+    }
+    let files = existingFiles.length ? mergeFiles(existingFiles, changedFiles) : changedFiles;
+
+    // Step 2 — review the combined files; Step 3 — revise once if rejected.
+    let reviewIssues = null, wasRevised = false;
+    if (reviewEnabled) {
+      const combined = files.map(f => `=== ${f.filename} ===\n${f.content}`).join('\n\n');
+      const { verdict, usage: reviewUsage } = await reviewSite(anthropic, tierCfg.reviewer.model, prompt, combined);
+      logStep(tierCfg.reviewer.model, `review:${tier}`, reviewUsage);
+      if (verdict && verdict.approved === false && verdict.issues) {
+        reviewIssues = verdict.issues;
+        const reviseExtra = `A senior reviewer found these issues with the current project. Return ONLY the files you need to change to fix them (each with full content) as {"files":[...]}, fixing ONLY these issues and leaving every other file untouched:\n${verdict.issues}`;
+        const priorHistory = [...effectiveHistory, { prompt, code: JSON.stringify({ files }) }];
+        const revised = await generateFiles(anthropic, generator, priorHistory, prompt, reviseExtra);
+        logStep(generator.model, `revise:${tier}`, revised.usage);
+        if (revised.files.length) { files = mergeFiles(files, revised.files); wasRevised = true; }
+      }
+    }
+
+    // Preview fallback — the main HTML, wrapped if it's a bare fragment.
+    const mainHtml = files.find(f => f.filename === 'index.html' || f.filename.endsWith('.html'));
+    let fallbackCode = mainHtml ? mainHtml.content : '';
+    if (!fallbackCode.toLowerCase().includes('<!doctype') && !fallbackCode.toLowerCase().includes('<html')) {
+      fallbackCode = `<!DOCTYPE html><html><head><meta charset="UTF-8"><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-slate-900 text-white p-8">${fallbackCode}</body></html>`;
+    }
+
+    // Token accounting — one row per step so the cost summary stays per-model.
+    const total = usageLog.reduce((s, e) => s + e.tokensIn + e.tokensOut, 0);
+    await pool.query('UPDATE users SET tokens_used = tokens_used + $1 WHERE id = $2', [total, req.user.id]);
+    for (const e of usageLog) {
+      await pool.query(
+        'INSERT INTO token_usage (user_id, project_id, tokens_in, tokens_out, model, action) VALUES ($1, $2, $3, $4, $5, $6)',
+        [req.user.id, project_id || null, e.tokensIn, e.tokensOut, e.model, e.action]
+      );
+    }
+
+    // SLM dataset — best-effort, never blocks the response.
+    pool.query(
+      `INSERT INTO training_samples (user_id, project_id, tier, prompt, output_code, review_issues, revised)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [req.user.id, project_id || null, tier, prompt, files.map(f => `=== ${f.filename} ===\n${f.content}`).join('\n\n'), reviewIssues, wasRevised]
+    ).catch((e) => console.error('training_samples insert failed:', e.message));
+
+    const { rows: updatedUserRows } = await pool.query('SELECT tokens_used, tokens_limit FROM users WHERE id = $1', [req.user.id]);
+    res.json({ code: fallbackCode, files, tier, tokens_used: updatedUserRows[0].tokens_used, tokens_limit: updatedUserRows[0].tokens_limit });
+  } catch (err) {
+    console.error('Generation error:', err);
+    const status = err instanceof Anthropic.APIError && err.status ? 502 : 500;
+    res.status(status).json({ error: 'Failed to generate', details: err.message });
+  }
+});
+
+// ── Builder orchestration: a generator writes the code, a reviewer checks it. ────
+// Generator + reviewer models are chosen by the request's tier (see BUILDER_TIERS).
+// The reviewer's output is tiny (a verdict), so putting a strong model there is
+// cheap relative to having it emit a full site.
+
+// Parse the Builder's { message, code, title, type } JSON out of a raw model string.
+function parseBuilderPayload(raw) {
+  const text = (raw || '').trim();
+  const tryParse = (s) => { try { return JSON.parse(s); } catch { return null; } };
+  let parsed = tryParse(text.replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim());
+  if (!parsed) { const m = text.match(/\{[\s\S]*\}/); if (m) parsed = tryParse(m[0]); }
+  return parsed && typeof parsed.code === 'string' ? parsed : null;
+}
+
+const asText = (content) => (typeof content === 'string' ? content : JSON.stringify(content));
+
+// Gemini generates (or revises) the single-file site. `extra` appends a one-off
+// instruction (e.g. reviewer fixes) to the latest user turn. Returns the parsed
+// payload plus token usage.
+async function geminiBuild(system, messages, extra) {
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, systemInstruction: system });
+  const history = messages.slice(0, -1).map((m) => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: asText(m.content) }],
+  }));
+  let prompt = asText(messages[messages.length - 1].content);
+  if (extra) prompt += `\n\n${extra}`;
+  const chat = model.startChat({
+    history,
+    generationConfig: {
+      maxOutputTokens: parseInt(process.env.BUILDER_MAX_OUTPUT_TOKENS || '32768'),
+      temperature: parseFloat(process.env.TEMPERATURE || '0.7'),
+      responseMimeType: 'application/json',
+    },
+  });
+  const result = await chat.sendMessage(prompt);
+  const response = await result.response;
+  const u = response.usageMetadata || {};
+  return {
+    payload: parseBuilderPayload(response.text()),
+    usage: { tokensIn: u.promptTokenCount || 0, tokensOut: u.candidatesTokenCount || 0 },
+  };
+}
+
+// Claude (Sonnet/Opus) generates the site — used by tiers whose generator is
+// anthropic. Same { message, code, title, type } contract as geminiBuild.
+async function anthropicBuild(anthropic, system, messages, model, extra) {
+  const msgs = messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: asText(m.content) }));
+  if (extra && msgs.length) {
+    const last = msgs[msgs.length - 1];
+    msgs[msgs.length - 1] = { ...last, content: `${last.content}\n\n${extra}` };
+  }
+  const stream = anthropic.messages.stream({
+    model,
+    max_tokens: parseInt(process.env.BUILDER_MAX_OUTPUT_TOKENS || '32768'),
+    output_config: { effort: 'medium' },
+    system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+    messages: msgs,
+  });
+  const response = await stream.finalMessage();
+  const raw = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  const u = response.usage || {};
+  const tokensIn = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+  return { payload: parseBuilderPayload(raw), usage: { tokensIn, tokensOut: u.output_tokens || 0 } };
+}
+
+// Call any OpenAI-compatible chat endpoint (DeepSeek, OpenRouter, Together, vLLM…).
+// Returns the assistant text + token usage. Uses Node's global fetch.
+async function openaiCompatChat({ model, system, messages, json }) {
+  const res = await fetch(`${OSS_BASE_URL.replace(/\/$/, '')}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OSS_API_KEY}` },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'system', content: system }, ...messages],
+      max_tokens: parseInt(process.env.BUILDER_MAX_OUTPUT_TOKENS || '32768'),
+      temperature: parseFloat(process.env.TEMPERATURE || '0.7'),
+      ...(json ? { response_format: { type: 'json_object' } } : {}),
+    }),
+  });
+  if (!res.ok) throw new Error(`OSS provider ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const data = await res.json();
+  const u = data.usage || {};
+  return {
+    text: data.choices?.[0]?.message?.content || '',
+    usage: { tokensIn: u.prompt_tokens || 0, tokensOut: u.completion_tokens || 0 },
+  };
+}
+
+// Open-weight single-file generator (same { message, code, title, type } contract).
+async function openaiBuild(model, system, messages, extra) {
+  const msgs = messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: asText(m.content) }));
+  if (extra && msgs.length) {
+    const last = msgs[msgs.length - 1];
+    msgs[msgs.length - 1] = { ...last, content: `${last.content}\n\n${extra}` };
+  }
+  const { text, usage } = await openaiCompatChat({ model, system, messages: msgs, json: true });
+  return { payload: parseBuilderPayload(text), usage };
+}
+
+// Dispatch generation to the tier's generator provider.
+function generateSite(anthropic, gen, system, messages, extra) {
+  if (gen.provider === 'gemini') return geminiBuild(system, messages, extra);
+  if (gen.provider === 'openai') return openaiBuild(gen.model, system, messages, extra);
+  return anthropicBuild(anthropic, system, messages, gen.model, extra);
+}
+
+// The reviewer (Sonnet or Opus) checks the generated HTML against the user's
+// request. Returns a verdict { approved, issues } plus token usage — output is
+// tiny → cheap even on a strong model.
+async function reviewSite(anthropic, model, userRequest, code) {
+  const reviewSystem = `You are a senior front-end reviewer for single-file HTML sites. A junior dev (Gemini) wrote the code. Judge whether it correctly and completely fulfils the user's request.
+Output ONLY a JSON object: {"approved": boolean, "issues": "string"}.
+- approved=true and issues="" when the site is good enough to ship.
+- approved=false with a SHORT, specific, actionable list of fixes otherwise.
+Flag only real problems: broken/empty links and anchors, buttons or forms that do nothing, sections the user asked for that are missing, broken or non-responsive layout, Lorem Ipsum or placeholder content, missing RTL/Arabic when the content is Arabic, invalid HTML. Do NOT nitpick subjective styling. Keep "issues" under 120 words.`;
+  const stream = anthropic.messages.stream({
+    model,
+    max_tokens: 6000,
+    output_config: { effort: 'low' },
+    system: [{ type: 'text', text: reviewSystem, cache_control: { type: 'ephemeral' } }],
+    messages: [{ role: 'user', content: `USER REQUEST:\n${userRequest}\n\nGENERATED HTML:\n${code}` }],
+  });
+  const response = await stream.finalMessage();
+  const raw = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  const verdict = parseBuilderPayload(raw) ||
+    (() => { try { return JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || ''); } catch { return null; } })() ||
+    { approved: true, issues: '' };
+  const u = response.usage || {};
+  const tokensIn = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+  return { verdict, usage: { tokensIn, tokensOut: u.output_tokens || 0 } };
+}
+
+// Deterministic structural guard — catches obviously broken output instantly and
+// for free, before spending a reviewer call. Deliberately conservative: only flags
+// clear breakage so it never triggers needless (costly) escalation.
+function validateSiteCode(code) {
+  const c = (code || '').trim();
+  const lc = c.toLowerCase();
+  const issues = [];
+  if (c.length < 400) issues.push('The page is too short to be a complete site.');
+  if (!lc.includes('<!doctype') && !lc.includes('<html')) issues.push('Missing the HTML document structure.');
+  if (!lc.includes('<body')) issues.push('Missing a <body> section.');
+  if (lc.includes('lorem ipsum')) issues.push('Contains Lorem Ipsum placeholder text.');
+  return { ok: issues.length === 0, issues: issues.join(' ') };
+}
+
+// A working, renderable fallback site seeded from the prompt — the last resort so a
+// user (especially a first-time free user) is never left with a broken result.
+function fallbackSite(userRequest) {
+  const isArabic = /[؀-ۿ]/.test(userRequest || '');
+  const safe = String(userRequest || 'Your idea')
+    .replace(/[<>&"]/g, (ch) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[ch])).slice(0, 280);
+  const dir = isArabic ? 'rtl' : 'ltr';
+  const cta = isArabic ? 'ابدأ الآن' : 'Get started';
+  const tag = isArabic ? 'مسودة بداية — حسّنها بنقرة واحدة' : 'Starter draft — refine it in one click';
+  const body = isArabic
+    ? 'هذه نقطة انطلاق جاهزة. اطلب التعديلات وسنبنيها معك خطوة بخطوة.'
+    : 'This is a ready starting point. Ask for changes and we will build it out with you, step by step.';
+  return `<!DOCTYPE html><html lang="${isArabic ? 'ar' : 'en'}" dir="${dir}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${safe}</title><script src="https://cdn.tailwindcss.com"></script></head><body class="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-8"><main class="max-w-2xl text-center"><span class="inline-block rounded-full bg-indigo-500/15 text-indigo-300 text-sm px-4 py-1 mb-6">${tag}</span><h1 class="text-4xl font-bold mb-4">${safe}</h1><p class="text-slate-400 mb-8 leading-relaxed">${body}</p><a href="#" class="inline-block rounded-2xl bg-indigo-500 hover:bg-indigo-400 transition px-6 py-3 font-semibold text-white">${cta}</a></main></body></html>`;
+}
+
+// ── Multi-file generation (Editor /api/generate, tier-aware) ─────────────────────
+const EDITOR_SYSTEM = `You are an expert web developer. Your ONLY job is to output a valid JSON object containing the files for a web project.
 CRITICAL RULES:
 - The output MUST be a valid JSON object with a "files" array.
 - Each object in the "files" array MUST have "filename" (string) and "content" (string) properties.
@@ -1017,90 +1990,307 @@ CRITICAL RULES:
 - All HTML files MUST be complete (include <!DOCTYPE html>, <html>, <head>, and <body>).
 - Use Tailwind CSS via CDN in HTML files: <script src="https://cdn.tailwindcss.com"></script>
 - Make the output visually stunning, modern, and professional.
-- DO NOT wrap the JSON in markdown fences, output ONLY raw JSON.`,
-    });
+- EDITING: When a prior message contains the current project's files, you are EDITING that existing project, NOT building a new one. Apply ONLY the requested change and return ONLY the files you actually modify or add — each with its FULL, complete content — as {"files":[...]}. Do NOT return files you did not touch. Never invent a new site or alter the content, structure, branding, or business domain that the user did not ask you to change. If the request only touches one file, return only that one file.
+- DO NOT wrap the JSON in markdown fences, output ONLY raw JSON.`;
 
-    const chat = model.startChat({
-      history: (history || []).flatMap(msg => [
-        { role: 'user', parts: [{ text: msg.prompt }] },
-        { role: 'model', parts: [{ text: msg.code }] },
-      ]),
-      generationConfig: {
-        maxOutputTokens: parseInt(process.env.MAX_OUTPUT_TOKENS || '8192'),
-        temperature: parseFloat(process.env.TEMPERATURE || '0.7'),
-        responseMimeType: 'application/json',
-      },
-    });
-
-    const result = await chat.sendMessage(prompt);
-    const response = await result.response;
-    let text = response.text();
-
-    // Parse JSON — full parse first, then salvage parser for truncated responses
-    let parsedFiles = [];
-    let fallbackCode = text;
-    try {
-      const parsed = JSON.parse(text);
-      if (parsed.files && Array.isArray(parsed.files)) {
-        parsedFiles = parsed.files;
-      }
-    } catch {
-      // Salvage: scan for complete {"filename": "...", "content": "..."} objects.
-      // We accumulate brace depth and string state to find balanced object boundaries.
-      const start = text.indexOf('"files"');
-      if (start !== -1) {
-        let i = text.indexOf('[', start);
-        let depth = 0, inStr = false, esc = false, objStart = -1;
-        while (i < text.length && i !== -1) {
-          const c = text[i];
-          if (inStr) {
-            if (esc) esc = false;
-            else if (c === '\\') esc = true;
-            else if (c === '"') inStr = false;
-          } else {
-            if (c === '"') inStr = true;
-            else if (c === '{') { if (depth === 0) objStart = i; depth++; }
-            else if (c === '}') {
-              depth--;
-              if (depth === 0 && objStart !== -1) {
-                try {
-                  const obj = JSON.parse(text.slice(objStart, i + 1));
-                  if (obj.filename && typeof obj.content === 'string') parsedFiles.push(obj);
-                } catch {}
-                objStart = -1;
-              }
-            }
+// Parse {files:[...]} from a raw model string, salvaging complete file objects
+// from truncated output (brace-depth scan).
+function parseFilesPayload(text) {
+  const parsedFiles = [];
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed.files && Array.isArray(parsed.files)) return parsed.files;
+  } catch {}
+  const start = text.indexOf('"files"');
+  if (start !== -1) {
+    let i = text.indexOf('[', start);
+    let depth = 0, inStr = false, esc = false, objStart = -1;
+    while (i < text.length && i !== -1) {
+      const c = text[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === '\\') esc = true;
+        else if (c === '"') inStr = false;
+      } else {
+        if (c === '"') inStr = true;
+        else if (c === '{') { if (depth === 0) objStart = i; depth++; }
+        else if (c === '}') {
+          depth--;
+          if (depth === 0 && objStart !== -1) {
+            try { const obj = JSON.parse(text.slice(objStart, i + 1)); if (obj.filename && typeof obj.content === 'string') parsedFiles.push(obj); } catch {}
+            objStart = -1;
           }
-          i++;
         }
       }
-      if (parsedFiles.length === 0) console.error('Failed to parse AI JSON response (no salvageable files)');
-      else console.warn(`Salvaged ${parsedFiles.length} file(s) from truncated AI response`);
+      i++;
     }
+  }
+  return parsedFiles;
+}
 
-    const mainHtml = parsedFiles.find(f => f.filename === 'index.html' || f.filename.endsWith('.html'));
-    if (mainHtml) fallbackCode = mainHtml.content;
+async function geminiBuildFiles(history, prompt, extra) {
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, systemInstruction: EDITOR_SYSTEM });
+  const chat = model.startChat({
+    history: (history || []).flatMap((msg) => [
+      { role: 'user', parts: [{ text: msg.prompt || '' }] },
+      { role: 'model', parts: [{ text: msg.code || '' }] },
+    ]),
+    generationConfig: {
+      maxOutputTokens: parseInt(process.env.BUILDER_MAX_OUTPUT_TOKENS || '32768'),
+      temperature: parseFloat(process.env.TEMPERATURE || '0.7'),
+      responseMimeType: 'application/json',
+    },
+  });
+  const response = (await chat.sendMessage(extra ? `${prompt}\n\n${extra}` : prompt)).response;
+  const u = response.usageMetadata || {};
+  return { files: parseFilesPayload(response.text()), usage: { tokensIn: u.promptTokenCount || 0, tokensOut: u.candidatesTokenCount || 0 } };
+}
 
-    if (!fallbackCode.toLowerCase().includes('<!doctype') && !fallbackCode.toLowerCase().includes('<html')) {
-      fallbackCode = `<!DOCTYPE html><html><head><meta charset="UTF-8"><script src="https://cdn.tailwindcss.com"></script></head><body class="bg-slate-900 text-white p-8">${fallbackCode}</body></html>`;
-    }
+async function anthropicBuildFiles(anthropic, model, history, prompt, extra) {
+  const messages = [];
+  (history || []).forEach((m) => {
+    messages.push({ role: 'user', content: m.prompt || '(no prompt)' });
+    messages.push({ role: 'assistant', content: m.code && m.code.trim() ? m.code : '(previous output)' });
+  });
+  messages.push({ role: 'user', content: extra ? `${prompt}\n\n${extra}` : prompt });
+  const stream = anthropic.messages.stream({
+    model,
+    max_tokens: parseInt(process.env.BUILDER_MAX_OUTPUT_TOKENS || '32768'),
+    output_config: { effort: 'medium' },
+    system: [{ type: 'text', text: EDITOR_SYSTEM, cache_control: { type: 'ephemeral' } }],
+    messages,
+  });
+  const response = await stream.finalMessage();
+  const raw = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+  const u = response.usage || {};
+  const tokensIn = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+  return { files: parseFilesPayload(raw), usage: { tokensIn, tokensOut: u.output_tokens || 0 } };
+}
 
-    const usage = response.usageMetadata;
-    const tokensIn = usage?.promptTokenCount || 0;
-    const tokensOut = usage?.candidatesTokenCount || 0;
-    const totalTokens = tokensIn + tokensOut;
+// Open-weight multi-file generator ({files:[...]} contract).
+async function openaiBuildFiles(model, history, prompt, extra) {
+  const messages = [];
+  (history || []).forEach((m) => {
+    messages.push({ role: 'user', content: m.prompt || '(no prompt)' });
+    messages.push({ role: 'assistant', content: m.code && m.code.trim() ? m.code : '(previous output)' });
+  });
+  messages.push({ role: 'user', content: extra ? `${prompt}\n\n${extra}` : prompt });
+  const { text, usage } = await openaiCompatChat({ model, system: EDITOR_SYSTEM, messages, json: true });
+  return { files: parseFilesPayload(text), usage };
+}
 
-    await pool.query('UPDATE users SET tokens_used = tokens_used + $1 WHERE id = $2', [totalTokens, req.user.id]);
-    await pool.query(
-      'INSERT INTO token_usage (user_id, project_id, tokens_in, tokens_out, model, action) VALUES ($1, $2, $3, $4, $5, $6)',
-      [req.user.id, project_id || null, tokensIn, tokensOut, 'gemini-flash-latest', 'generate']
+// Dispatch multi-file generation to the tier's generator provider.
+function generateFiles(anthropic, gen, history, prompt, extra) {
+  if (gen.provider === 'gemini') return geminiBuildFiles(history, prompt, extra);
+  if (gen.provider === 'openai') return openaiBuildFiles(gen.model, history, prompt, extra);
+  return anthropicBuildFiles(anthropic, gen.model, history, prompt, extra);
+}
+
+// POST /api/ai/generate — Builder site generation. Gemini generates, Opus reviews,
+// Gemini revises once if the review fails. Body: { system, messages, projectId? }.
+// Returns the { message, code, title, type } payload plus token usage.
+app.post('/api/ai/generate', authMiddleware, async (req, res) => {
+  const { system, messages, projectId } = req.body;
+  if (!system || !Array.isArray(messages) || messages.length === 0) {
+    return res.status(400).json({ error: 'system and messages are required' });
+  }
+
+  // Resolve the requested tier (capable1/2/3). Unknown values fall back to default.
+  // Mutable: a non-Pro user requesting a paid tier is auto-downgraded below.
+  let tier = BUILDER_TIERS[req.body.tier] ? req.body.tier : DEFAULT_TIER;
+  let tierCfg = BUILDER_TIERS[tier];
+  const reviewEnabled = process.env.BUILDER_REVIEW !== 'off';
+  const needsAnthropic = reviewEnabled || tierCfg.generator.provider === 'anthropic';
+
+  const anthropic = getAnthropic();
+  if (!anthropic && needsAnthropic) {
+    return res.status(503).json({ error: 'ai_unavailable', details: 'ANTHROPIC_API_KEY is not configured on the server' });
+  }
+
+  try {
+    // Credit gate — 402 lets the client prompt an upgrade (distinct from a 429 rate limit).
+    const { rows: userRows } = await pool.query(
+      'SELECT tokens_used, tokens_limit, plan FROM users WHERE id = $1', [req.user.id]
     );
+    const user = userRows[0];
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    // Monthly compute ceiling (the real margin guardrail) — resets each calendar month.
+    const monthlyBudget = monthlyTokenBudget(user.plan);
+    if (Number.isFinite(monthlyBudget)) {
+      const monthlyUsed = await getMonthlyTokens(pool, req.user.id);
+      if (monthlyUsed >= monthlyBudget) {
+        return res.status(402).json({
+          error: 'insufficient_credits',
+          reason: 'monthly_tokens',
+          monthly_tokens_used: monthlyUsed,
+          monthly_tokens_limit: monthlyBudget,
+          plan: user.plan,
+          upgrade_required: true,
+        });
+      }
+    }
 
-    const { rows: updatedUserRows } = await pool.query('SELECT tokens_used, tokens_limit FROM users WHERE id = $1', [req.user.id]);
-    res.json({ code: fallbackCode, files: parsedFiles, tokens_used: updatedUserRows[0].tokens_used, tokens_limit: updatedUserRows[0].tokens_limit });
+    // Capable 2/3 are Pro-only. Non-Pro users are auto-downgraded (so a generation
+    // never dead-ends) and nudged to upgrade via the upsell whisper below.
+    let tierLocked = false;
+    if ((tier === 'capable2' || tier === 'capable3') && !(user.plan === 'pro' || user.plan === 'enterprise')) {
+      tier = DEFAULT_TIER;
+      tierCfg = BUILDER_TIERS[tier];
+      tierLocked = true;
+    }
+
+    // Per-tier budget gate — the pricier tiers run out sooner. 402 lets the client
+    // offer "downgrade to a cheaper tier or upgrade your plan".
+    const tierLimit = TIER_LIMITS[tier];
+    if (tierLimit) {
+      const { rows: tu } = await pool.query(
+        `SELECT COALESCE(SUM(tokens_in + tokens_out), 0)::bigint AS used
+           FROM token_usage WHERE user_id = $1 AND action LIKE $2`,
+        [req.user.id, `%:${tier}`]
+      );
+      const tierUsed = Number(tu[0].used);
+      if (tierUsed >= tierLimit) {
+        return res.status(402).json({
+          error: 'tier_limit_reached',
+          tier, tier_used: tierUsed, tier_limit: tierLimit,
+          can_downgrade: tier !== DEFAULT_TIER,
+          upgrade_required: true,
+        });
+      }
+    }
+
+    // ── Reliability ladder (free-first) ──────────────────────────────────────
+    // generate → deterministic guard → review → revise → re-check → escalate the
+    // generator (Gemini → Sonnet → Opus) → and a working fallback as the last
+    // resort, so a user is NEVER left with a broken result. Escalation only fires
+    // on the failing minority; on the free funnel that spend is acquisition cost.
+    const usageLog = []; // { tokensIn, tokensOut, model, action }
+    const logStep = (model, action, usage) => usageLog.push({ model, action, ...usage });
+    const userRequest = asText(messages[messages.length - 1].content);
+
+    // Generator ladder: the tier's own generator first, then Sonnet, then Opus.
+    // De-duped by model so we never retry the identical model; anthropic rungs are
+    // skipped when no key is configured.
+    const ladder = [];
+    const seenModels = new Set();
+    for (const gen of [initialGenerator(tierCfg.generator), { provider: 'anthropic', model: SONNET_MODEL }, { provider: 'anthropic', model: OPUS_MODEL }]) {
+      if (gen.provider === 'anthropic' && !anthropic) continue;
+      if (seenModels.has(gen.model)) continue;
+      seenModels.add(gen.model);
+      ladder.push(gen);
+    }
+
+    let parsed = null, reviewIssues = null, wasRevised = false;
+    let escalated = false, finalModel = null, lastIssues = '';
+
+    for (let rung = 0; rung < ladder.length; rung++) {
+      const generator = ladder[rung];
+      if (rung > 0) escalated = true;
+
+      // Generate; carry the prior rung's problems forward as fix instructions.
+      const extra = lastIssues
+        ? `A previous attempt had these problems. Produce a COMPLETE single-file site in the exact JSON format that fixes them:\n${lastIssues}`
+        : undefined;
+      let attempt = await generateSite(anthropic, generator, system, messages, extra);
+      logStep(generator.model, `generate:${tier}:rung${rung}`, attempt.usage);
+      let code = attempt.payload?.code;
+
+      // Deterministic guard (free, instant) — escalate on parse/structure failure.
+      if (!attempt.payload || !code) { lastIssues = 'The output could not be parsed as a valid site.'; continue; }
+      const struct = validateSiteCode(code);
+      if (!struct.ok) { lastIssues = struct.issues; continue; }
+
+      if (reviewEnabled) {
+        const { verdict, usage: reviewUsage } = await reviewSite(anthropic, tierCfg.reviewer.model, userRequest, code);
+        logStep(tierCfg.reviewer.model, `review:${tier}:rung${rung}`, reviewUsage);
+
+        if (verdict && verdict.approved === false && verdict.issues) {
+          reviewIssues = verdict.issues;
+          // One in-place revise with the same generator, then re-check.
+          const priorTurn = { role: 'assistant', content: JSON.stringify({ message: attempt.payload.message, code }) };
+          const reviseExtra = `A senior reviewer found these issues. Return the COMPLETE corrected single-file site in the exact same JSON format, fixing ONLY these issues:\n${verdict.issues}`;
+          const revised = await generateSite(anthropic, generator, system, [...messages, priorTurn], reviseExtra);
+          logStep(generator.model, `revise:${tier}:rung${rung}`, revised.usage);
+
+          if (revised.payload?.code && validateSiteCode(revised.payload.code).ok) {
+            const recheck = await reviewSite(anthropic, tierCfg.reviewer.model, userRequest, revised.payload.code);
+            logStep(tierCfg.reviewer.model, `recheck:${tier}:rung${rung}`, recheck.usage);
+            wasRevised = true;
+            if (!recheck.verdict || recheck.verdict.approved !== false) { parsed = revised.payload; finalModel = generator.model; break; }
+            lastIssues = recheck.verdict.issues || verdict.issues;
+            continue; // still failing → escalate to the next rung
+          }
+          lastIssues = verdict.issues;
+          continue; // revise produced nothing usable → escalate
+        }
+      }
+
+      // Approved (or review disabled) and structurally sound → success.
+      parsed = attempt.payload; finalModel = generator.model; break;
+    }
+
+    // Last resort — never leave the user empty-handed.
+    let fallbackUsed = false;
+    if (!parsed) {
+      fallbackUsed = true;
+      finalModel = 'fallback';
+      parsed = { message: 'We generated a starting draft you can refine.', code: fallbackSite(userRequest), title: 'Draft', type: 'site' };
+    }
+
+    // Soft upsell whisper: a reason code the client localizes (ar/en). Surfaces the
+    // stronger engines only when relevant, without nagging.
+    let upsell = null;
+    if (tierLocked) upsell = 'tier_locked';
+    else if (fallbackUsed) upsell = 'fallback';
+    else if (escalated) upsell = 'escalated';
+    else if (tier === DEFAULT_TIER) upsell = 'tip';
+
+    // Token accounting — one row per step so the cost summary stays per-model.
+    const total = usageLog.reduce((s, e) => s + e.tokensIn + e.tokensOut, 0);
+    await pool.query('UPDATE users SET tokens_used = tokens_used + $1 WHERE id = $2', [total, req.user.id]);
+    for (const e of usageLog) {
+      await pool.query(
+        'INSERT INTO token_usage (user_id, project_id, tokens_in, tokens_out, model, action) VALUES ($1, $2, $3, $4, $5, $6)',
+        [req.user.id, projectId || null, e.tokensIn, e.tokensOut, e.model, e.action]
+      );
+    }
+
+    // SLM dataset — capture the prompt, the final code, and the reviewer's
+    // corrections so a future in-house small model can learn from real
+    // generations and their fixes. Best-effort; never blocks the response.
+    pool.query(
+      `INSERT INTO training_samples (user_id, project_id, tier, prompt, output_code, review_issues, revised)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [req.user.id, projectId || null, tier, userRequest, parsed.code, reviewIssues, wasRevised]
+    ).catch((e) => console.error('training_samples insert failed:', e.message));
+
+    // Persist generated code to the project, but only if the caller owns it.
+    if (projectId && parsed.code) {
+      await pool.query(
+        `UPDATE projects SET code = $1, name = COALESCE($2, name), updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3 AND user_id = $4`,
+        [parsed.code, parsed.title || null, projectId, req.user.id]
+      );
+    }
+
+    const { rows: updated } = await pool.query('SELECT tokens_used, tokens_limit FROM users WHERE id = $1', [req.user.id]);
+    res.json({
+      message: parsed.message,
+      code: parsed.code,
+      title: parsed.title,
+      type: parsed.type,
+      tier,
+      escalated,
+      fallback: fallbackUsed,
+      final_model: finalModel,
+      upsell,
+      tokens_used: updated[0].tokens_used,
+      tokens_limit: updated[0].tokens_limit,
+    });
   } catch (err) {
-    console.error('Generation error:', err);
-    res.status(500).json({ error: 'Failed to generate', details: err.message });
+    console.error('Claude generation error:', err);
+    const status = err instanceof Anthropic.APIError && err.status ? 502 : 500;
+    res.status(status).json({ error: 'generation_failed', details: err.message });
   }
 });
 
@@ -1112,7 +2302,37 @@ app.get('/api/usage', authMiddleware, async (req, res) => {
   try {
     const { rows: uRows } = await pool.query('SELECT tokens_used, tokens_limit, plan FROM users WHERE id = $1', [req.user.id]);
     const { rows: history } = await pool.query('SELECT * FROM token_usage WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20', [req.user.id]);
-    res.json({ ...uRows[0], history });
+
+    // Per-operation total tokens + exact USD cost from the model pricing table.
+    const enriched = history.map((row) => {
+      const total_tokens = (row.tokens_in || 0) + (row.tokens_out || 0);
+      return { ...row, total_tokens, cost_usd: Number(costUsd(row.model, row.tokens_in, row.tokens_out).toFixed(6)) };
+    });
+
+    // Lifetime totals across every operation (not just the last 20 above).
+    const { rows: agg } = await pool.query(
+      `SELECT model,
+              COUNT(*)::int            AS operations,
+              COALESCE(SUM(tokens_in),0)::bigint  AS tokens_in,
+              COALESCE(SUM(tokens_out),0)::bigint AS tokens_out
+         FROM token_usage WHERE user_id = $1 GROUP BY model`,
+      [req.user.id]
+    );
+    let total_cost_usd = 0;
+    const by_model = agg.map((m) => {
+      const cost = costUsd(m.model, Number(m.tokens_in), Number(m.tokens_out));
+      total_cost_usd += cost;
+      return {
+        model: m.model,
+        operations: m.operations,
+        tokens_in: Number(m.tokens_in),
+        tokens_out: Number(m.tokens_out),
+        total_tokens: Number(m.tokens_in) + Number(m.tokens_out),
+        cost_usd: Number(cost.toFixed(6)),
+      };
+    });
+
+    res.json({ ...uRows[0], history: enriched, cost_summary: { by_model, total_cost_usd: Number(total_cost_usd.toFixed(6)) } });
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
   }

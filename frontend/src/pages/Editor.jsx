@@ -1,10 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
-import { Sparkles, Send, Code2, Eye, Loader, Save, AlertCircle, CheckCircle, Clock, ChevronDown, ChevronUp, Zap, Settings, X, Plus, FileCode, FileType2, FileJson, Camera, Globe, Copy, ShieldCheck, ShoppingBag, Users, ChevronRight } from 'lucide-react';
+import { Sparkles, Send, Code2, Eye, Loader, Save, AlertCircle, CheckCircle, Clock, ChevronDown, ChevronUp, Zap, Settings, X, Plus, FileCode, FileType2, FileJson, Camera, Globe, Copy, ShieldCheck, ShoppingBag, Users, ChevronRight, FolderOpen } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
+
+// Model tiers (same engine as the Builder). Higher tiers cost more but review harder.
+const EDITOR_TIERS = [
+  { id: 'capable1', name: 'Capable 1', ar: 'سريع واقتصادي', en: 'Fast & economical' },
+  { id: 'capable2', name: 'Capable 2', ar: 'جودة أعلى ومراجعة أدق', en: 'Higher quality, deeper review' },
+  { id: 'capable3', name: 'Capable 3', ar: 'أعلى جودة — استهلاك أكبر وحد أقل', en: 'Top quality — more usage, tighter limit' },
+];
+// Friendly status lines shown while the agent works.
+const EDITOR_STATUS = [
+  { ar: 'وكيل كيبابل يفكّر في الحل…', en: 'Capable is thinking…' },
+  { ar: 'يكتب الكود ويبني الملفات…', en: 'Writing the code and files…' },
+  { ar: 'يراجع الجودة ويصلح التفاصيل…', en: 'Reviewing quality and fixing details…' },
+  { ar: 'يلمّع اللمسات الأخيرة…', en: 'Polishing the final touches…' },
+];
 
 function DnsRow({ label, host, value, onCopy }) {
   return (
@@ -81,12 +95,22 @@ export default function Editor() {
   const [generationCount, setGenerationCount] = useState(0);
   const [showGrowthSignal, setShowGrowthSignal] = useState(false);
   const [growthDismissed, setGrowthDismissed] = useState(false);
+  const [tier, setTier] = useState('capable1');     // capable1 | capable2 | capable3
+  const [statusIdx, setStatusIdx] = useState(0);    // cycles the working status line
   const { t } = useLang();
+  const isRTL = t('lang') === 'ar';
   const { authFetch } = useAuth();
   const { id } = useParams();
   const navigate = useNavigate();
   const nameRef = useRef(null);
   const iframeRef = useRef(null);
+
+  // Rotate the agent status line while generating.
+  useEffect(() => {
+    if (!loading) { setStatusIdx(0); return; }
+    const iv = setInterval(() => setStatusIdx(i => i + 1), 4000);
+    return () => clearInterval(iv);
+  }, [loading]);
 
   /* ── load project ─────────────────────────────── */
   useEffect(() => {
@@ -251,13 +275,19 @@ export default function Editor() {
     try {
       const response = await authFetch('/api/generate', {
         method: 'POST',
-        body: JSON.stringify({ prompt, history, project_id: id }),
+        body: JSON.stringify({ prompt, history, project_id: id, tier }),
       });
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
+        if (err.error === 'tier_limit_reached') {
+          if (err.can_downgrade) setTier('capable1');
+          throw new Error(isRTL
+            ? `انتهى حد موديل ${err.tier} (الأعلى جودة يستهلك أكثر). تم الرجوع للموديل الأقل — أو رقِّ باقتك للاستمرار عليه.`
+            : `${err.tier} limit reached (higher quality costs more). Switched you to the cheaper model — or upgrade to keep using it.`);
+        }
         if (err.upgrade_required) {
-          throw new Error(t('lang') === 'ar' ? `نفدت توكناتك الشهرية (${err.tokens_used}/${err.tokens_limit}). الرجاء الترقية.` : `Monthly token limit reached (${err.tokens_used}/${err.tokens_limit}). Please upgrade.`);
+          throw new Error(isRTL ? `نفدت توكناتك الشهرية (${err.tokens_used}/${err.tokens_limit}). الرجاء الترقية.` : `Monthly token limit reached (${err.tokens_used}/${err.tokens_limit}). Please upgrade.`);
         }
         throw new Error(err.details || `Server error ${response.status}`);
       }
@@ -558,38 +588,8 @@ export default function Editor() {
 
       {/* ── Body ── */}
       <div className="flex flex-1 overflow-hidden">
-        {/* ── Sidebar (File Explorer + AI) ── */}
+        {/* ── Sidebar (AI Assistant) ── */}
         <div className="w-72 shrink-0 border-r border-slate-800 bg-slate-900/50 flex flex-col overflow-hidden">
-          
-          {/* Files */}
-          <div className="flex-1 flex flex-col min-h-0 border-b border-slate-800">
-            <div className="flex items-center justify-between p-3 border-b border-slate-800">
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">{t('lang') === 'ar' ? 'الملفات' : 'Files'}</span>
-              <button onClick={handleAddFile} className="text-slate-400 hover:text-white transition-colors">
-                <Plus size={16} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
-              {files.map(f => (
-                <div 
-                  key={f.id} 
-                  onClick={() => { setActiveFileId(f.id); setActiveTab('code'); }}
-                  className={`flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors ${activeFileId === f.id ? 'bg-indigo-600/20 text-indigo-300' : 'text-slate-300 hover:bg-slate-800'}`}
-                >
-                  <div className="flex items-center gap-2">
-                    {getFileIcon(f.filename)}
-                    <span>{f.filename}</span>
-                  </div>
-                  <button 
-                    onClick={(e) => handleDeleteFile(f.id, e)}
-                    className="text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
 
           {/* AI Assistant */}
           <div className="p-4 flex-1 flex flex-col min-h-0 overflow-y-auto">
@@ -599,6 +599,28 @@ export default function Editor() {
             <p className="text-[10px] text-slate-500 mb-3">{t('aiCreditsDesc')}</p>
 
             <form onSubmit={handleGenerate} className="flex flex-col gap-2">
+              {/* Model tier selector — all tiers available; higher ones cost more. */}
+              <div className="flex items-center gap-1">
+                {EDITOR_TIERS.map(tm => (
+                  <button
+                    key={tm.id}
+                    type="button"
+                    onClick={() => setTier(tm.id)}
+                    title={isRTL ? tm.ar : tm.en}
+                    disabled={loading}
+                    className={`flex-1 px-2 py-1 rounded-lg text-[10px] font-semibold border transition-all disabled:opacity-50
+                      ${tier === tm.id
+                        ? 'bg-indigo-600 border-indigo-500 text-white'
+                        : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:text-white hover:border-indigo-500/40'}`}
+                  >
+                    {tm.name}
+                  </button>
+                ))}
+              </div>
+              <p className={`text-[10px] leading-relaxed ${tier === 'capable3' ? 'text-amber-400' : 'text-slate-500'}`}>
+                {tier === 'capable3' && '⚡ '}
+                {isRTL ? EDITOR_TIERS.find(x => x.id === tier).ar : EDITOR_TIERS.find(x => x.id === tier).en}
+              </p>
               <textarea
                 value={prompt}
                 onChange={e => setPrompt(e.target.value)}
@@ -617,6 +639,18 @@ export default function Editor() {
                   ? <><Loader className="animate-spin" size={15} /> {t('generating')}</>
                   : <><Send size={15} /> {t('generate')}</>}
               </button>
+              {loading && (
+                <div className="flex items-center gap-2 text-xs text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-3 py-2 animate-in fade-in">
+                  <span className="flex gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </span>
+                  <span key={statusIdx} className="animate-in fade-in">
+                    {isRTL ? EDITOR_STATUS[statusIdx % EDITOR_STATUS.length].ar : EDITOR_STATUS[statusIdx % EDITOR_STATUS.length].en}
+                  </span>
+                </div>
+              )}
             </form>
 
             {/* ── History ── */}
@@ -859,7 +893,7 @@ export default function Editor() {
 
           {/* Tabs */}
           <div className="flex bg-slate-900 border-b border-slate-800">
-            {[['preview', <Eye size={14}/>, t('preview')], ['code', <Code2 size={14}/>, t('code')]].map(([tab, icon, label]) => (
+            {[['preview', <Eye size={14}/>, t('preview')], ['code', <Code2 size={14}/>, t('code')], ['files', <FolderOpen size={14}/>, t('lang') === 'ar' ? 'الملفات' : 'Files']].map(([tab, icon, label]) => (
               <button key={tab} onClick={() => setActiveTab(tab)}
                 className={`flex-1 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 border-b-2 transition-all ${
                   activeTab === tab ? 'border-indigo-500 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -911,6 +945,54 @@ export default function Editor() {
             {activeTab === 'code' && !activeFile && (
               <div className="absolute inset-0 flex items-center justify-center text-slate-500">
                 {t('lang') === 'ar' ? 'حدد ملفاً لتعديله' : 'Select a file to edit'}
+              </div>
+            )}
+
+            {activeTab === 'files' && (
+              <div className="absolute inset-0 w-full h-full bg-slate-900 flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <FolderOpen size={16} className="text-indigo-400" />
+                    <span className="text-sm font-bold text-white">{t('lang') === 'ar' ? 'ملفات المشروع' : 'Project Files'}</span>
+                    <span className="text-xs text-slate-500">({files.length})</span>
+                  </div>
+                  <button
+                    onClick={handleAddFile}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
+                  >
+                    <Plus size={14} /> {t('lang') === 'ar' ? 'ملف جديد' : 'New file'}
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4">
+                  {files.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-slate-500 text-sm">
+                      {t('lang') === 'ar' ? 'لا توجد ملفات بعد' : 'No files yet'}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {files.map(f => (
+                        <div
+                          key={f.id}
+                          onClick={() => { setActiveFileId(f.id); setActiveTab('code'); }}
+                          className={`group relative flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer border transition-colors ${activeFileId === f.id ? 'bg-indigo-600/15 border-indigo-500/50' : 'bg-slate-800/40 border-slate-800 hover:bg-slate-800 hover:border-slate-700'}`}
+                        >
+                          <div className="shrink-0">{getFileIcon(f.filename)}</div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm text-slate-200 truncate">{f.filename}</div>
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wider">{(f.filename.split('.').pop() || '').toUpperCase()}</div>
+                          </div>
+                          <button
+                            onClick={(e) => handleDeleteFile(f.id, e)}
+                            className="text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                            title={t('lang') === 'ar' ? 'حذف' : 'Delete'}
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

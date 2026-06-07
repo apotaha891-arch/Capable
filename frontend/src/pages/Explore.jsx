@@ -8,8 +8,7 @@ import NewProjectModal from '../components/NewProjectModal.jsx';
 import GalleryCard from '../components/GalleryCard.jsx';
 import GalleryPreviewModal from '../components/GalleryPreviewModal.jsx';
 import { CATEGORIES, categoryLabel } from '../data/galleryTemplates.js';
-
-const API = 'http://localhost:5000';
+import { API_BASE as API } from '../utils/api.js';
 
 export default function Explore() {
   const [apiProjects, setApiProjects] = useState([]);

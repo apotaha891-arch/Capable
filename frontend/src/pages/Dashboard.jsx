@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Sparkles, Plus, Trash2, FolderOpen, Globe, Share2, Zap, LogOut, Settings, ArrowUpRight, Compass, Wand2, MessageCircle, Link2, Check, Users, ChevronRight, Shield, Gauge } from 'lucide-react';
+import { Sparkles, Plus, Trash2, FolderOpen, Globe, GlobeLock, Share2, Zap, LogOut, Settings, ArrowUpRight, Compass, Wand2, MessageCircle, Link2, Check, Users, ChevronRight, Shield, Gauge, Tag, Target } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
 import NotificationBell from '../components/NotificationBell.jsx';
-import NewProjectModal from '../components/NewProjectModal.jsx';
 import { siteUrl, whatsappShareUrl, shareSite } from '../utils/site.js';
+import { hostedUrl } from '../utils/api.js';
 import CapableLogo from '../components/CapableLogo.jsx';
 
 const PLAN_COLORS = { free: 'text-slate-400', pro: 'text-indigo-400', enterprise: 'text-amber-400' };
@@ -90,20 +90,28 @@ function ConsultingCard({ lang, t }) {
 export default function Dashboard() {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [usage, setUsage] = useState(null);
   const [quota, setQuota] = useState(null);
-  const [showNewModal, setShowNewModal] = useState(false);
   const { t, lang } = useLang();
   const { user, logout, authFetch } = useAuth();
 
-  useEffect(() => {
+  const loadData = () => {
+    setLoading(true);
+    setLoadError(false);
     Promise.all([
       authFetch('/api/projects').then(r => r.json()),
       authFetch('/api/usage').then(r => r.json()),
       authFetch('/api/blueprint/quota').then(r => r.json()).catch(() => null),
-    ]).then(([p, u, q]) => { setProjects(p); setUsage(u); setQuota(q); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
+    ]).then(([p, u, q]) => {
+      setProjects(Array.isArray(p) ? p : []);
+      setUsage(u);
+      setQuota(q);
+      setLoading(false);
+    }).catch(() => { setLoadError(true); setLoading(false); });
+  };
+
+  useEffect(() => { loadData(); }, []);
 
   const handleDelete = async (id) => {
     if (!window.confirm(t('deleteConfirm'))) return;
@@ -220,6 +228,15 @@ export default function Dashboard() {
             <Link to="/explore" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
               <Compass size={14} /> {lang === 'ar' ? 'استكشف القوالب' : 'Browse Templates'}
             </Link>
+            <Link to="/influence" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
+              <Sparkles size={14} /> {lang === 'ar' ? 'تأثير' : 'Influence Pass'}
+            </Link>
+            <Link to="/commitment" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
+              <Target size={14} /> {lang === 'ar' ? 'التزام' : 'Commitment Vault'}
+            </Link>
+            <Link to="/marketplace" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
+              <Tag size={14} /> {lang === 'ar' ? 'السوق' : 'Marketplace'}
+            </Link>
             <button className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
               <Settings size={14} /> {lang === 'ar' ? 'الإعدادات' : 'Settings'}
             </button>
@@ -236,17 +253,28 @@ export default function Dashboard() {
               <h1 className="text-2xl font-bold text-white">{t('myProjects')}</h1>
               <p className="text-sm text-slate-400">{t('manageProjects')}</p>
             </div>
-            <button
-              onClick={() => setShowNewModal(true)}
+            <Link
+              to="/builder"
               className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2 shadow-lg shadow-indigo-500/20"
             >
               <Plus size={16} /> {t('newProject')}
-            </button>
+            </Link>
           </div>
 
           {loading ? (
             <div className="flex justify-center py-20">
-              <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+              <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" role="status" aria-label={lang === 'ar' ? 'جارٍ التحميل' : 'Loading'} />
+            </div>
+          ) : loadError ? (
+            <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-red-900/40 rounded-3xl text-center">
+              <p className="text-slate-200 font-semibold">{lang === 'ar' ? 'تعذّر تحميل مشاريعك' : 'Couldn’t load your projects'}</p>
+              <p className="text-sm text-slate-500 mb-5">{lang === 'ar' ? 'تحقّق من اتصالك ثم حاول مجدداً.' : 'Check your connection and try again.'}</p>
+              <button
+                onClick={loadData}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-sm font-medium"
+              >
+                {lang === 'ar' ? 'إعادة المحاولة' : 'Retry'}
+              </button>
             </div>
           ) : projects.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 border-2 border-dashed border-slate-800 rounded-3xl text-center">
@@ -254,12 +282,12 @@ export default function Dashboard() {
               <p className="text-slate-300 font-semibold">{t('noProjects')}</p>
               <p className="text-sm text-slate-500 mb-5">{t('noProjectsDesc')}</p>
               <div className="flex gap-3">
-                <button
-                  onClick={() => setShowNewModal(true)}
+                <Link
+                  to="/builder"
                   className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-sm font-medium flex items-center gap-1.5"
                 >
                   <Plus size={14} /> {t('newProject')}
-                </button>
+                </Link>
                 <Link
                   to="/explore"
                   className="bg-slate-800 hover:bg-slate-700 text-white px-5 py-2 rounded-xl text-sm font-medium flex items-center gap-1.5"
@@ -285,8 +313,6 @@ export default function Dashboard() {
           )}
         </section>
       </main>
-
-      <NewProjectModal isOpen={showNewModal} onClose={() => setShowNewModal(false)} />
     </div>
   );
 }
@@ -315,7 +341,7 @@ function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
   const editPath = project.has_blueprint ? `/blueprint/${project.id}` : `/editor/${project.id}`;
   const liveUrl = project.has_blueprint
     ? siteUrl(project.published_slug)
-    : `http://localhost:5000/hosted/${project.published_slug}/index.html`;
+    : hostedUrl(project.published_slug);
   const [copied, setCopied] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
 
@@ -366,6 +392,7 @@ function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
           <Link
             to={`/project/${project.id}`}
             title={lang === 'ar' ? 'لوحة تحكم المشروع' : 'Project control panel'}
+            aria-label={lang === 'ar' ? 'لوحة تحكم المشروع' : 'Project control panel'}
             className="border border-slate-700 hover:border-indigo-500 hover:text-indigo-400 text-slate-400 rounded-lg p-1.5 transition-colors"
           >
             <Gauge size={13} />
@@ -375,6 +402,7 @@ function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
               href={liveUrl}
               target="_blank" rel="noreferrer"
               title={lang === 'ar' ? 'عرض المنشور' : 'View live'}
+              aria-label={lang === 'ar' ? 'عرض الموقع المنشور' : 'View live site'}
               className="border border-emerald-700/40 hover:bg-emerald-600 hover:text-white text-emerald-400 rounded-lg p-1.5 transition-colors"
             >
               <Globe size={13} />
@@ -383,6 +411,7 @@ function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
             <button
               onClick={onPublish}
               title={lang === 'ar' ? 'نشر' : 'Publish'}
+              aria-label={lang === 'ar' ? 'نشر المشروع' : 'Publish project'}
               className="border border-indigo-700/40 hover:bg-indigo-600 hover:text-white text-indigo-400 rounded-lg p-1.5 transition-colors"
             >
               <Globe size={13} />
@@ -393,6 +422,7 @@ function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
               <button
                 onClick={onShare}
                 title={lang === 'ar' ? 'مشاركة' : 'Share'}
+                aria-label={copied ? (lang === 'ar' ? 'تم نسخ الرابط' : 'Link copied') : (lang === 'ar' ? 'مشاركة' : 'Share')}
                 className="border border-slate-700 hover:border-indigo-500 hover:text-indigo-400 text-slate-400 rounded-lg p-1.5 transition-colors"
               >
                 {copied ? <Check size={13} className="text-emerald-400" /> : <Share2 size={13} />}
@@ -421,14 +451,16 @@ function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
             <button
               onClick={onUnpublish}
               title={lang === 'ar' ? 'إلغاء النشر' : 'Unpublish'}
+              aria-label={lang === 'ar' ? 'إلغاء نشر المشروع' : 'Unpublish project'}
               className="border border-slate-700 hover:border-amber-500 hover:text-amber-400 text-slate-400 rounded-lg p-1.5 transition-colors"
             >
-              <Globe size={13} className="opacity-60" />
+              <GlobeLock size={13} />
             </button>
           )}
           <button
             onClick={onDelete}
             title={lang === 'ar' ? 'حذف' : 'Delete'}
+            aria-label={lang === 'ar' ? 'حذف المشروع' : 'Delete project'}
             className="border border-slate-700 hover:border-red-500 hover:text-red-400 text-slate-400 rounded-lg p-1.5 transition-colors"
           >
             <Trash2 size={13} />

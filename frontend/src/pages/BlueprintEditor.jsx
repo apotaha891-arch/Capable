@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Save, ExternalLink, ChevronUp, ChevronDown, Trash2, Plus, Check, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Save, ExternalLink, ChevronUp, ChevronDown, Trash2, Plus, Check, AlertTriangle, Code2, Lock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useLang } from '../i18n/LangContext.jsx';
 import BlueprintPreview from '../blueprint/BlueprintPreview.jsx';
@@ -9,12 +10,38 @@ import { BLOCK_DEFAULTS, BLOCK_TYPES, newBlockId } from '../blueprint/blockDefau
 import { blockLabel } from '../blueprint/labels.js';
 import { siteUrl } from '../utils/site.js';
 
+// Plans that may open a blueprint project in the code editor (المحرر).
+const CODE_EDITOR_PLANS = ['influence', 'pro', 'enterprise'];
+
+// Serialize a blueprint to a standalone, editable HTML document (Tailwind CDN +
+// font + theme), reusing the same preview component the editor renders with.
+function toStandaloneHtml(bp) {
+  const inner = renderToStaticMarkup(<BlueprintPreview blueprint={bp} />);
+  const font = bp?.theme?.font_family;
+  const fontLink = font
+    ? `<link href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(font)}:wght@300;400;600;700;900&display=swap" rel="stylesheet">`
+    : '';
+  return `<!DOCTYPE html>
+<html lang="${bp.language || 'en'}" dir="${bp.direction || 'ltr'}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${bp.project_name || 'Site'}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+${fontLink}
+</head>
+<body>${inner}</body>
+</html>`;
+}
+
 export default function BlueprintEditor() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { authFetch } = useAuth();
+  const { authFetch, user } = useAuth();
   const { lang } = useLang();
   const ar = lang === 'ar';
+  const canUseCodeEditor = CODE_EDITOR_PLANS.includes(user?.plan);
+  const [converting, setConverting] = useState(false);
 
   const [project, setProject] = useState(null);
   const [bp, setBp] = useState(null);
@@ -77,6 +104,22 @@ export default function BlueprintEditor() {
     finally { setSaving(false); }
   };
 
+  // Paid: snapshot the blueprint as editable HTML and jump to the code editor.
+  const openInCodeEditor = async () => {
+    if (!canUseCodeEditor) { navigate('/influence'); return; }
+    setConverting(true); setError('');
+    try {
+      const html = toStandaloneHtml(bp);
+      const res = await authFetch(`/api/projects/${id}/convert-to-code`, { method: 'POST', body: JSON.stringify({ code: html }) });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.error === 'upgrade_required') { navigate('/influence'); return; }
+        throw new Error(data.error || 'Failed to open code editor');
+      }
+      navigate(`/editor/${id}`);
+    } catch (e) { setError(e.message); setConverting(false); }
+  };
+
   if (loading) return <Center><Spinner /></Center>;
   if (error && !bp) return <Center><div className="text-slate-400">{error}</div></Center>;
   if (!bp) return (
@@ -106,6 +149,16 @@ export default function BlueprintEditor() {
         <div className="flex items-center gap-2">
           {error && <span className="text-amber-400 text-xs flex items-center gap-1 max-w-xs truncate"><AlertTriangle size={14} />{error}</span>}
           {liveUrl && <a href={liveUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-slate-300 hover:text-white flex items-center gap-1 px-3 py-2">{ar ? 'عرض' : 'View'} <ExternalLink size={14} /></a>}
+          <button
+            onClick={openInCodeEditor}
+            disabled={converting}
+            title={canUseCodeEditor ? (ar ? 'افتح في محرر الأكواد' : 'Open in code editor') : (ar ? 'ميزة مدفوعة — افتح في محرر الأكواد' : 'Paid feature — open in code editor')}
+            className="text-sm border border-slate-700 hover:border-indigo-500 hover:text-indigo-300 text-slate-300 px-3 py-2 rounded-lg flex items-center gap-1.5 disabled:opacity-50"
+          >
+            {converting ? <Spinner small /> : <Code2 size={14} />}
+            {ar ? 'المحرر' : 'Code editor'}
+            {!canUseCodeEditor && <Lock size={12} className="text-amber-400" />}
+          </button>
           <button onClick={save} disabled={saving} className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">
             {saving ? <Spinner small /> : saved ? <Check size={16} /> : <Save size={16} />}
             {saved ? (ar ? 'تم الحفظ' : 'Saved') : (ar ? 'حفظ' : 'Save')}
