@@ -3,7 +3,7 @@ import { Search, Shield } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Spinner, money, tt } from './AdminShared.jsx';
 
-const PLANS = ['free', 'pro', 'enterprise'];
+const PLANS = ['free', 'influence', 'pro', 'enterprise'];
 const ROLES = ['user', 'admin'];
 
 export default function UsersTab({ lang }) {
@@ -44,6 +44,7 @@ export default function UsersTab({ lang }) {
               <th className="text-start font-medium px-4 py-3">{tt(lang, 'Revenue', 'الإيراد')}</th>
               <th className="text-start font-medium px-4 py-3">{tt(lang, 'Plan', 'الخطة')}</th>
               <th className="text-start font-medium px-4 py-3">{tt(lang, 'Role', 'الدور')}</th>
+              <th className="text-start font-medium px-4 py-3">{tt(lang, 'Partner', 'شريك')}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
@@ -71,10 +72,18 @@ export default function UsersTab({ lang }) {
                     {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </td>
+                <td className="px-4 py-3">
+                  <button
+                    onClick={() => update(u.id, { is_partner: !u.is_partner })}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors ${u.is_partner ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'}`}
+                  >
+                    {u.is_partner ? tt(lang, 'Partner', 'شريك') : tt(lang, 'Make partner', 'تعيين شريك')}
+                  </button>
+                </td>
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-500">{tt(lang, 'No users found.', 'لا يوجد مستخدمون.')}</td></tr>
+              <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-500">{tt(lang, 'No users found.', 'لا يوجد مستخدمون.')}</td></tr>
             )}
           </tbody>
         </table>

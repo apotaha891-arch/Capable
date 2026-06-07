@@ -99,7 +99,11 @@ export default function Editor() {
   const [statusIdx, setStatusIdx] = useState(0);    // cycles the working status line
   const { t } = useLang();
   const isRTL = t('lang') === 'ar';
-  const { authFetch } = useAuth();
+  const { authFetch, user } = useAuth();
+  // Custom-domain gating (mirrors backend PLAN_LIMITS): free locked, Influence 1
+  // (branded), Pro/enterprise unlimited (unbranded).
+  const domainsAllowed = ({ influence: true, pro: true, enterprise: true }[user?.plan]) || false;
+  const domainIsBranded = user?.plan === 'influence';
   const { id } = useParams();
   const navigate = useNavigate();
   const nameRef = useRef(null);
@@ -355,7 +359,12 @@ export default function Editor() {
           method: 'PUT',
           body: JSON.stringify({ name: projectName, description, thumbnail_url: thumbnailUrl, price: Number(price), code: compiledCode, custom_domain: customDomain || null }),
         });
-        if (!res.ok) throw new Error('Update failed');
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          if (d.error === 'upgrade_required') throw new Error(t('lang') === 'ar' ? 'النطاقات المخصصة متاحة في الباقات المدفوعة.' : 'Custom domains are available on paid plans.');
+          if (d.error === 'domain_limit_reached') throw new Error(t('lang') === 'ar' ? `وصلت للحد الأقصى للنطاقات (${d.domains_limit}). رقِّ إلى Pro للمزيد.` : `Domain limit reached (${d.domains_limit}). Upgrade to Pro for more.`);
+          throw new Error('Update failed');
+        }
         
         // 2. Save individual files
         for (const f of files) {
@@ -490,7 +499,7 @@ export default function Editor() {
     <div className="h-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden">
       {/* ── Navbar ── */}
       <nav className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-800 bg-slate-900 shrink-0">
-        <Link to="/" className="flex items-center gap-1.5 mr-2">
+        <Link to="/" className="flex items-center gap-1.5 me-2">
           <div className="bg-indigo-600 p-1.5 rounded-lg"><Sparkles size={16} /></div>
           <span className="font-bold text-lg bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">Capable</span>
         </Link>
@@ -518,7 +527,7 @@ export default function Editor() {
           <Settings size={18} />
         </button>
 
-        <div className="flex items-center gap-2 ml-auto">
+        <div className="flex items-center gap-2 ms-auto">
           {tokenInfo && (() => {
             const pct = Math.round((tokenInfo.tokens_used / tokenInfo.tokens_limit) * 100);
             const barColor = pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-amber-500' : 'bg-indigo-500';
@@ -785,6 +794,23 @@ export default function Editor() {
                           )}
                         </div>
 
+                        {!domainsAllowed ? (
+                          <div className="rounded-xl border border-indigo-700/40 bg-indigo-900/20 p-4 text-center">
+                            <p className="text-sm text-slate-300 mb-3">
+                              {t('lang') === 'ar' ? 'النطاقات المخصصة متاحة في الباقات المدفوعة. باقة Influence تشمل نطاقاً واحداً.' : 'Custom domains are a paid feature. The Influence plan includes one.'}
+                            </p>
+                            <Link to="/influence" className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                              <Zap size={14} /> {t('lang') === 'ar' ? 'الترقية' : 'Upgrade'}
+                            </Link>
+                          </div>
+                        ) : (
+                        <>
+                        {domainIsBranded && (
+                          <div className="mb-3 text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                            {t('lang') === 'ar' ? 'سيظهر شعار "Powered by Capable" على موقعك. رقِّ إلى Pro لإزالته.' : 'Your site will show a “Powered by Capable” badge. Upgrade to Pro to remove it.'}
+                          </div>
+                        )}
+
                         <div className="flex gap-2 mb-3">
                           <input
                             type="text" value={customDomain} onChange={e => setCustomDomain(e.target.value.trim().toLowerCase())}
@@ -846,6 +872,8 @@ export default function Editor() {
                               </div>
                             )}
                           </div>
+                        )}
+                        </>
                         )}
                       </div>
 

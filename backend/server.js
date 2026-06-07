@@ -16,7 +16,7 @@ import dns from 'dns/promises';
 import { generateBlueprint, getFallbackBlueprint, GenerationError } from './src/blueprint/generate.js';
 import { BlueprintSchema } from './src/blueprint/schema.js';
 import { activeProviderName } from './src/ai/provider.js';
-import { getUsage, secondsUntilMidnight, monthlyTokenBudget, getMonthlyTokens, effectiveDeployLimit } from './src/limits.js';
+import { getUsage, secondsUntilMidnight, monthlyTokenBudget, getMonthlyTokens, getMonthlyTokenGrants, effectiveDeployLimit, customDomainLimit, domainBranded } from './src/limits.js';
 import { monthlySeries, currentMRR, forecast as buildForecast, cashPosition, recommendations as buildRecommendations } from './src/admin/finance.js';
 import { deliverCampaign, mailMode } from './src/admin/mailer.js';
 import { seedDemoFinance } from './src/admin/seedDemo.js';
@@ -244,6 +244,63 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_influence_events_user ON influence_events(user_id, created_at);
 
+      -- Challenges (admin-issued; replaces user-staked commitment vaults). Users
+      -- join, progress is measured automatically from real activity, winners get a
+      -- reward (tokens | subscription credit | cash payout).
+      CREATE TABLE IF NOT EXISTS challenges (
+        id SERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        goal_type TEXT NOT NULL DEFAULT 'generation_count',  -- publish_count | project_count | generation_count
+        goal_target INTEGER NOT NULL DEFAULT 1,
+        reward_type TEXT NOT NULL DEFAULT 'tokens',           -- tokens | credit | cash
+        reward_value NUMERIC(12,2) NOT NULL DEFAULT 0,
+        starts_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        ends_at TIMESTAMP,
+        status TEXT DEFAULT 'active',                          -- active | draft | ended
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS challenge_participants (
+        id SERIAL PRIMARY KEY,
+        challenge_id INTEGER REFERENCES challenges(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        baseline INTEGER DEFAULT 0,        -- metric value at join, so progress counts only after joining
+        progress INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'joined',      -- joined | rewarded | expired
+        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        completed_at TIMESTAMP,
+        rewarded_at TIMESTAMP,
+        UNIQUE (challenge_id, user_id)
+      );
+      -- Bonus generation tokens granted (e.g. challenge wins); added to the monthly budget.
+      CREATE TABLE IF NOT EXISTS token_grants (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        amount INTEGER NOT NULL DEFAULT 0,
+        reason TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_token_grants_user ON token_grants(user_id, created_at);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS account_credit NUMERIC(12,2) DEFAULT 0;
+
+      -- Meme-licensing (Workstream E): creator-listed modules backed by a real
+      -- project, with propagation/fitness tracking.
+      ALTER TABLE licensed_assets ADD COLUMN IF NOT EXISTS creator_id INTEGER REFERENCES users(id) ON DELETE SET NULL;
+      ALTER TABLE licensed_assets ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL;
+      ALTER TABLE licensed_assets ADD COLUMN IF NOT EXISTS adoption_count INTEGER DEFAULT 0;
+
+      -- Ecosystem partners + adaptive fund (Workstream F).
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_partner BOOLEAN DEFAULT false;
+      CREATE TABLE IF NOT EXISTS adaptive_fund (
+        id SERIAL PRIMARY KEY,
+        direction TEXT NOT NULL,            -- in (contribution) | out (disbursement)
+        amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,  -- recipient for 'out'
+        reason TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+
       -- In-app notifications (CRM → customers)
       CREATE TABLE IF NOT EXISTS notifications (
         id SERIAL PRIMARY KEY,
@@ -326,6 +383,10 @@ async function initDB() {
       ALTER TABLE page_events         ENABLE ROW LEVEL SECURITY;
       ALTER TABLE leads               ENABLE ROW LEVEL SECURITY;
       ALTER TABLE influence_events    ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE challenges          ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE challenge_participants ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE token_grants        ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE adaptive_fund       ENABLE ROW LEVEL SECURITY;
       ALTER TABLE training_samples    ENABLE ROW LEVEL SECURITY;
     `);
 
@@ -389,7 +450,17 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
 
 app.use(express.json({ limit: '10mb' }));
 
+// "Powered by Capable" badge — the $19 viral hook injected into branded plans'
+// custom-domain pages. Pro/enterprise serve unbranded.
+function injectCapableBadge(html) {
+  if (typeof html !== 'string') return html;
+  const badge = `\n<a href="https://capable.app/?ref=badge" target="_blank" rel="noopener" style="position:fixed;bottom:12px;right:12px;z-index:2147483647;display:inline-flex;align-items:center;gap:6px;background:#0f172a;color:#fff;font:600 12px/1 system-ui,sans-serif;padding:8px 12px;border-radius:9999px;text-decoration:none;box-shadow:0 2px 10px rgba(0,0,0,.25)">⚡ Powered by Capable</a>\n`;
+  return html.includes('</body>') ? html.replace('</body>', badge + '</body>') : html + badge;
+}
+
 // Host-based routing for verified custom domains. Skipped on localhost and for API/hosted/uploads paths.
+// Plan-aware: a downgraded owner (plan no longer allows custom domains) stops being
+// served, and branded plans (Influence) get the "Powered by Capable" badge.
 const SYSTEM_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
 app.use(async (req, res, next) => {
   if (req.path.startsWith('/api/') || req.path.startsWith('/hosted/')) return next();
@@ -397,14 +468,24 @@ app.use(async (req, res, next) => {
   if (!host || SYSTEM_HOSTS.has(host)) return next();
   try {
     const { rows } = await pool.query(
-      `SELECT published_slug FROM projects
-       WHERE LOWER(custom_domain) = $1 AND domain_verified = true AND is_published = true
-       LIMIT 1`,
+      `SELECT p.published_slug, u.plan
+         FROM projects p JOIN users u ON u.id = p.user_id
+        WHERE LOWER(p.custom_domain) = $1 AND p.domain_verified = true AND p.is_published = true
+        LIMIT 1`,
       [host]
     );
     if (rows.length > 0) {
-      const file = path.join(hostedDir, rows[0].published_slug, 'index.html');
-      if (fs.existsSync(file)) return res.sendFile(file);
+      const { published_slug, plan } = rows[0];
+      if (customDomainLimit(plan) <= 0) return next(); // owner downgraded — domain no longer active
+      const file = path.join(hostedDir, published_slug, 'index.html');
+      if (fs.existsSync(file)) {
+        if (domainBranded(plan)) {
+          const html = injectCapableBadge(fs.readFileSync(file, 'utf-8'));
+          res.set('Content-Type', 'text/html; charset=utf-8');
+          return res.send(html);
+        }
+        return res.sendFile(file);
+      }
     }
   } catch (err) {
     console.error('Custom domain lookup failed:', err.message);
@@ -739,8 +820,31 @@ app.post('/api/projects', authMiddleware, async (req, res) => {
 app.put('/api/projects/:id', authMiddleware, async (req, res) => {
   try {
     const { name, description, thumbnail_url, price, code, is_public, custom_domain, seo_title, seo_description, og_image_url } = req.body;
-    const { rows: projRows } = await pool.query('SELECT id FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    const { rows: projRows } = await pool.query('SELECT id, custom_domain FROM projects WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
     if (projRows.length === 0) return res.status(404).json({ error: 'Project not found' });
+
+    // Custom-domain gating (Workstream C): plan must allow custom domains, within
+    // the plan's count (free locked, Influence 1, Pro/enterprise unlimited).
+    if (custom_domain && String(custom_domain).trim()) {
+      const newDomain = String(custom_domain).trim().toLowerCase();
+      const currentDomain = (projRows[0].custom_domain || '').toLowerCase();
+      if (newDomain !== currentDomain) {
+        const { rows: u } = await pool.query('SELECT plan FROM users WHERE id = $1', [req.user.id]);
+        const limit = customDomainLimit(u[0]?.plan);
+        if (limit <= 0) {
+          return res.status(403).json({ error: 'upgrade_required', message: 'Custom domains are available on paid plans.' });
+        }
+        if (Number.isFinite(limit)) {
+          const { rows: c } = await pool.query(
+            'SELECT COUNT(*)::int AS n FROM projects WHERE user_id = $1 AND custom_domain IS NOT NULL AND id <> $2',
+            [req.user.id, req.params.id]
+          );
+          if (c[0].n >= limit) {
+            return res.status(402).json({ error: 'domain_limit_reached', domains_used: c[0].n, domains_limit: limit, plan: u[0]?.plan });
+          }
+        }
+      }
+    }
 
     await pool.query(`UPDATE projects SET
       name = COALESCE($1, name),
@@ -920,6 +1024,7 @@ const INFLUENCE_WEIGHTS = {
   commitment_payout: 8,    // converting staked behavior into achievement
   meme_license: 6,         // adopting / propagating a memetic module
   commitment_stake: 5,     // locking value into a behavioral vault
+  challenge_win: 6,        // completing an admin-issued challenge
   referral: 4,             // propagating the brand
   feature_vote: 3,         // steering the roadmap
   engagement: 1,           // passive participation
@@ -966,6 +1071,98 @@ async function userIdForCustomer(customerId) {
   return rows[0]?.id || null;
 }
 
+// Deep-copy a project (code + blueprint + files) into another user's account.
+// Shared by the clone route and meme-license adoption. Returns the new project.
+async function cloneProjectForUser(sourceId, ownerId, ownerName) {
+  const { rows: sr } = await pool.query('SELECT * FROM projects WHERE id = $1', [sourceId]);
+  const source = sr[0];
+  if (!source) return null;
+  const hasBlueprint = !!source.blueprint;
+  const cloneName = `${source.name} (Clone)`;
+  let newSlug = null;
+  if (hasBlueprint) {
+    newSlug = await uniqueSlug(source.blueprint.project_name_en || source.blueprint.project_name || cloneName);
+  }
+  const { rows: np } = await pool.query(
+    `INSERT INTO projects (user_id, name, description, thumbnail_url, price, code, blueprint,
+                           author, is_public, is_published, published_slug, last_edited, updated_at)
+     VALUES ($1, $2, $3, $4, 0, $5, $6, $7, false, $8, $9, NOW(), NOW()) RETURNING id`,
+    [ownerId, cloneName, source.description, source.thumbnail_url, source.code, source.blueprint || null, ownerName, hasBlueprint, newSlug]
+  );
+  const newId = np[0].id;
+  const { rows: files } = await pool.query('SELECT * FROM project_files WHERE project_id = $1', [source.id]);
+  for (const f of files) {
+    await pool.query('INSERT INTO project_files (project_id, filename, content, file_type) VALUES ($1, $2, $3, $4)', [newId, f.filename, f.content, f.file_type]);
+  }
+  return { id: newId, has_blueprint: hasBlueprint, slug: newSlug };
+}
+
+// Platform keeps (1 − share); the creator earns this fraction of each paid license.
+const LICENSE_CREATOR_SHARE = 0.7;
+
+// Fulfill a meme-license purchase: adopt (clone the linked project to the buyer),
+// bump the asset's adoption count (its "fitness"), pay the creator their share, and
+// record influence for both sides. Idempotency is the caller's responsibility.
+async function fulfillMemeLicense(buyerId, asset, amountPaid) {
+  let clone = null;
+  if (asset.project_id) {
+    const { rows: u } = await pool.query('SELECT name FROM users WHERE id = $1', [buyerId]);
+    clone = await cloneProjectForUser(asset.project_id, buyerId, u[0]?.name || 'user');
+  }
+  await pool.query('UPDATE licensed_assets SET adoption_count = COALESCE(adoption_count, 0) + 1 WHERE id = $1', [asset.id]);
+
+  const price = Number(amountPaid ?? asset.price) || 0;
+  if (asset.creator_id && asset.creator_id !== buyerId && price > 0) {
+    const share = Math.round(price * LICENSE_CREATOR_SHARE * 100) / 100;
+    await pool.query('UPDATE users SET account_credit = COALESCE(account_credit, 0) + $1 WHERE id = $2', [share, asset.creator_id]);
+    await pool.query('INSERT INTO transactions (user_id, type, amount, status, description) VALUES ($1, $2, $3, $4, $5)',
+      [asset.creator_id, 'payout', share, 'paid', `Creator share: ${asset.title}`]);
+    await recordInfluence(asset.creator_id, 'meme_license', { target: asset.slug, metadata: { role: 'creator', earned: share } });
+  }
+  await recordInfluence(buyerId, 'meme_license', { target: asset.slug, metadata: { asset_id: asset.id, price, role: 'buyer' } });
+  // A slice of platform revenue funds the adaptive fund (Workstream F).
+  const platformRevenue = (asset.creator_id && asset.creator_id !== buyerId && price > 0)
+    ? price * (1 - LICENSE_CREATOR_SHARE) : price;
+  await contributeToFund(platformRevenue * ADAPTIVE_FUND_RATE, `license:${asset.slug}`);
+  return clone;
+}
+
+// ── Adaptive fund (Workstream F) + adaptive pricing (Workstream G) ────────────
+
+const ADAPTIVE_FUND_RATE = 0.10; // 10% of platform revenue feeds the fund
+
+// A user's live resonance score (30-day half-life weighted influence) — the lever
+// for adaptive pricing and fund reallocation.
+async function resonanceScore(userId) {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(SUM(weight * power(0.5, EXTRACT(EPOCH FROM (now() - created_at)) / (86400 * 30))), 0) AS score
+       FROM influence_events WHERE user_id = $1`,
+    [userId]
+  );
+  return Number(rows[0].score) || 0;
+}
+
+// Resonance → personalized discount: engagement "collapses" pricing in your favor.
+function adaptiveDiscount(score) {
+  const s = Number(score) || 0;
+  if (s >= 50) return 0.15;
+  if (s >= 20) return 0.10;
+  if (s >= 5) return 0.05;
+  return 0;
+}
+
+async function contributeToFund(amount, reason) {
+  const a = Math.round((Number(amount) || 0) * 100) / 100;
+  if (a <= 0) return;
+  try { await pool.query("INSERT INTO adaptive_fund (direction, amount, reason) VALUES ('in', $1, $2)", [a, reason]); }
+  catch (e) { console.error('contributeToFund failed:', e.message); }
+}
+
+async function adaptiveFundBalance() {
+  const { rows } = await pool.query("SELECT COALESCE(SUM(CASE WHEN direction='in' THEN amount ELSE -amount END), 0) AS bal FROM adaptive_fund");
+  return Number(rows[0].bal) || 0;
+}
+
 // Central Stripe event fulfillment. Plans/grants are applied ONLY here, after
 // Stripe confirms the money actually moved. Called from the webhook route.
 async function handleStripeEvent(event) {
@@ -994,7 +1191,10 @@ async function handleStripeEvent(event) {
           userId, type: 'template_sale', amount,
           description: `Licensed asset: ${obj.metadata.asset_slug}`, stripeRef: obj.id,
         });
-        if (wrote) await recordInfluence(userId, 'meme_license', { target: obj.metadata.asset_slug, metadata: { asset_id: obj.metadata.asset_id, price: amount } });
+        if (wrote) {
+          const { rows: ar } = await pool.query('SELECT * FROM licensed_assets WHERE id = $1', [obj.metadata.asset_id]);
+          if (ar[0]) await fulfillMemeLicense(userId, ar[0], amount); // adopt + pay creator + influence
+        }
       }
       break;
     }
@@ -1015,6 +1215,7 @@ async function handleStripeEvent(event) {
       if (wrote && !isSlots && obj.billing_reason === 'subscription_cycle') {
         await recordInfluence(userId, 'observer_fee', { target: plan, metadata: { amount, source: 'renewal' } });
       }
+      if (wrote && !isSlots) await contributeToFund(amount * ADAPTIVE_FUND_RATE, 'subscription'); // Workstream F
       break;
     }
     case 'invoice.payment_failed': {
@@ -1055,28 +1256,60 @@ async function handleStripeEvent(event) {
 // GET /api/biz/assets
 app.get('/api/biz/assets', authMiddleware, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT id, slug, title, description, price, metadata FROM licensed_assets ORDER BY created_at DESC');
+    // Ordered by adoption_count ("fitness") — high-adoption modules surface first.
+    const { rows } = await pool.query(
+      `SELECT a.id, a.slug, a.title, a.description, a.price, a.metadata,
+              COALESCE(a.adoption_count, 0) AS adoption_count, a.project_id, a.creator_id,
+              u.name AS creator_name
+         FROM licensed_assets a
+         LEFT JOIN users u ON u.id = a.creator_id
+        ORDER BY COALESCE(a.adoption_count, 0) DESC, a.created_at DESC`
+    );
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: 'Failed to load marketplace assets', details: err.message });
   }
 });
 
+// POST /api/biz/assets — list one of YOUR projects as a licensable module.
+app.post('/api/biz/assets', authMiddleware, async (req, res) => {
+  try {
+    const { project_id, title, description, price } = req.body || {};
+    if (!project_id || !title) return res.status(400).json({ error: 'project_id and title are required' });
+    const { rows: pr } = await pool.query('SELECT id FROM projects WHERE id = $1 AND user_id = $2', [project_id, req.user.id]);
+    if (!pr[0]) return res.status(404).json({ error: 'Project not found' });
+    const slug = (String(title).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'module')
+      + '-' + crypto.randomBytes(3).toString('hex');
+    const { rows } = await pool.query(
+      `INSERT INTO licensed_assets (slug, title, description, price, creator_id, project_id, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, '{}') RETURNING *`,
+      [slug, title, description || '', Math.max(0, Math.round(Number(price) || 0)), req.user.id, project_id]
+    );
+    res.status(201).json({ asset: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list module', details: err.message });
+  }
+});
+
 // POST /api/biz/assets/:id/buy
 app.post('/api/biz/assets/:id/buy', authMiddleware, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT id, slug, title, price FROM licensed_assets WHERE id = $1', [req.params.id]);
+    const { rows } = await pool.query('SELECT * FROM licensed_assets WHERE id = $1', [req.params.id]);
     const asset = rows[0];
     if (!asset) return res.status(404).json({ error: 'Asset not found' });
 
-    // Free asset or simulated mode: grant immediately.
-    if (!stripe || !asset.price || asset.price <= 0) {
+    // Adaptive pricing (Workstream G): resonance discounts the adoption price.
+    const pct = adaptiveDiscount(await resonanceScore(req.user.id));
+    const effectivePrice = Math.round((asset.price || 0) * (1 - pct) * 100) / 100;
+
+    // Free asset or simulated mode: grant + adopt immediately.
+    if (!stripe || effectivePrice <= 0) {
       await pool.query(
         'INSERT INTO transactions (user_id, type, amount, status, description, project_id) VALUES ($1, $2, $3, $4, $5, NULL)',
-        [req.user.id, 'template_sale', asset.price || 0, 'paid', `Purchased licensed asset: ${asset.title}${stripe ? '' : ' (simulated)'}`]
+        [req.user.id, 'template_sale', effectivePrice, 'paid', `Purchased licensed asset: ${asset.title}${stripe ? '' : ' (simulated)'}`]
       );
-      await recordInfluence(req.user.id, 'meme_license', { target: asset.slug, metadata: { asset_id: asset.id, price: asset.price || 0 } });
-      return res.json({ success: true, asset });
+      const clone = await fulfillMemeLicense(req.user.id, asset, effectivePrice);
+      return res.json({ success: true, asset, cloned_project_id: clone?.id || null, discount_pct: Math.round(pct * 100) });
     }
 
     const customer = await getOrCreateCustomer(req.user.id);
@@ -1087,7 +1320,7 @@ app.post('/api/biz/assets/:id/buy', authMiddleware, async (req, res) => {
         quantity: 1,
         price_data: {
           currency: 'usd',
-          unit_amount: Math.round(asset.price * 100),
+          unit_amount: Math.round(effectivePrice * 100),
           product_data: { name: asset.title, metadata: { asset_slug: asset.slug } },
         },
       }],
@@ -1112,16 +1345,20 @@ app.post('/api/biz/subscribe', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'Invalid plan selected', allowed: Object.keys(PLAN_PRICE_LOOKUP) });
     }
 
+    // Adaptive pricing (Workstream G): resonance earns a personalized discount.
+    const pct = adaptiveDiscount(await resonanceScore(req.user.id));
+
     // Simulated mode (no Stripe keys): keep dev working.
     if (!stripe) {
-      const amount = PLAN_FALLBACK_AMOUNT[plan] || 0;
+      const amount = Math.round((PLAN_FALLBACK_AMOUNT[plan] || 0) * (1 - pct) * 100) / 100;
       await pool.query('UPDATE users SET plan = $1 WHERE id = $2', [plan, req.user.id]);
       await pool.query(
         'INSERT INTO transactions (user_id, type, amount, status, description, plan) VALUES ($1, $2, $3, $4, $5, $6)',
         [req.user.id, 'subscription', amount, 'paid', `Subscribed to ${plan} (simulated)`, plan]
       );
       await recordInfluence(req.user.id, 'observer_fee', { target: plan, metadata: { amount, simulated: true } });
-      return res.json({ success: true, plan, simulated: true });
+      await contributeToFund(amount * ADAPTIVE_FUND_RATE, 'subscription');
+      return res.json({ success: true, plan, simulated: true, discount_pct: Math.round(pct * 100), amount });
     }
 
     const priceId = await resolvePriceId(PLAN_PRICE_LOOKUP[plan]);
@@ -1129,7 +1366,7 @@ app.post('/api/biz/subscribe', authMiddleware, async (req, res) => {
       return res.status(500).json({ error: `No active Stripe Price with lookup_key "${PLAN_PRICE_LOOKUP[plan]}"` });
     }
     const customer = await getOrCreateCustomer(req.user.id);
-    const session = await stripe.checkout.sessions.create({
+    const sessionParams = {
       mode: 'subscription',
       customer,
       line_items: [{ price: priceId, quantity: 1 }],
@@ -1138,7 +1375,12 @@ app.post('/api/biz/subscribe', authMiddleware, async (req, res) => {
       subscription_data: { metadata: { user_id: String(req.user.id), plan } },
       success_url: `${FRONTEND_URL}/influence?checkout=success`,
       cancel_url: `${FRONTEND_URL}/influence?checkout=cancel`,
-    });
+    };
+    if (pct > 0) {
+      const coupon = await stripe.coupons.create({ percent_off: Math.round(pct * 100), duration: 'once', name: `Resonance ${Math.round(pct * 100)}%` });
+      sessionParams.discounts = [{ coupon: coupon.id }];
+    }
+    const session = await stripe.checkout.sessions.create(sessionParams);
     res.json({ url: session.url });
   } catch (err) {
     res.status(500).json({ error: 'Failed to start subscription', details: err.message });
@@ -1186,53 +1428,150 @@ app.post('/api/biz/deploy-slots', authMiddleware, async (req, res) => {
 });
 
 // GET /api/biz/commitments
-app.get('/api/biz/commitments', authMiddleware, async (req, res) => {
+// ── Challenges (admin-issued; replaces user commitment vaults) ───────────────
+
+const CHALLENGE_GOALS = ['publish_count', 'project_count', 'generation_count'];
+const CHALLENGE_REWARDS = ['tokens', 'credit', 'cash'];
+
+// A user's current cumulative value for a goal metric (progress = current − baseline).
+async function measureMetric(userId, goalType) {
+  if (goalType === 'publish_count') {
+    const { rows } = await pool.query('SELECT COUNT(*)::int AS n FROM projects WHERE user_id = $1 AND is_published = true', [userId]);
+    return rows[0].n;
+  }
+  if (goalType === 'project_count') {
+    const { rows } = await pool.query('SELECT COUNT(*)::int AS n FROM projects WHERE user_id = $1', [userId]);
+    return rows[0].n;
+  }
+  const { rows } = await pool.query(
+    "SELECT COUNT(*)::int AS n FROM token_usage WHERE user_id = $1 AND action = 'blueprint_generate'", [userId]
+  );
+  return rows[0].n;
+}
+
+// Grant a winner's reward. tokens → monthly bonus grant; credit → account balance;
+// cash → a pending payout for an admin to process. Best-effort influence event.
+async function grantChallengeReward(userId, challenge) {
+  const v = Number(challenge.reward_value) || 0;
+  if (challenge.reward_type === 'tokens') {
+    await pool.query('INSERT INTO token_grants (user_id, amount, reason) VALUES ($1, $2, $3)', [userId, Math.round(v), `Challenge: ${challenge.title}`]);
+  } else if (challenge.reward_type === 'credit') {
+    await pool.query('UPDATE users SET account_credit = COALESCE(account_credit, 0) + $1 WHERE id = $2', [v, userId]);
+    await pool.query('INSERT INTO transactions (user_id, type, amount, status, description) VALUES ($1, $2, $3, $4, $5)', [userId, 'expense', v, 'paid', `Challenge credit: ${challenge.title}`]);
+  } else if (challenge.reward_type === 'cash') {
+    await pool.query('INSERT INTO transactions (user_id, type, amount, status, description) VALUES ($1, $2, $3, $4, $5)', [userId, 'payout', v, 'pending', `Challenge cash prize: ${challenge.title}`]);
+  }
+  await recordInfluence(userId, 'challenge_win', { target: String(challenge.id), metadata: { reward_type: challenge.reward_type, reward_value: v } });
+}
+
+// Recompute a participant's progress; transition to rewarded/expired and grant the
+// reward when the goal is met within the window. Idempotent via the status guard.
+async function evaluateParticipation(part, challenge) {
+  if (part.status !== 'joined') return part;
+  const ended = challenge.ends_at && new Date(challenge.ends_at).getTime() < Date.now();
+  const current = await measureMetric(part.user_id, challenge.goal_type);
+  const progress = Math.max(0, current - (part.baseline || 0));
+
+  if (progress >= challenge.goal_target && !ended) {
+    const upd = await pool.query(
+      "UPDATE challenge_participants SET progress = $1, status = 'rewarded', completed_at = NOW(), rewarded_at = NOW() WHERE id = $2 AND status = 'joined'",
+      [progress, part.id]
+    );
+    if (upd.rowCount === 1) await grantChallengeReward(part.user_id, challenge); // only the winning race grants
+    return { ...part, progress, status: 'rewarded' };
+  }
+  if (ended) {
+    await pool.query("UPDATE challenge_participants SET progress = $1, status = 'expired' WHERE id = $2 AND status = 'joined'", [progress, part.id]);
+    return { ...part, progress, status: 'expired' };
+  }
+  await pool.query('UPDATE challenge_participants SET progress = $1 WHERE id = $2', [progress, part.id]);
+  return { ...part, progress };
+}
+
+// GET /api/challenges — active challenges + the caller's live participation/progress.
+app.get('/api/challenges', authMiddleware, async (req, res) => {
+  try {
+    const { rows: challenges } = await pool.query(
+      `SELECT * FROM challenges
+        WHERE status = 'active'
+          AND (starts_at IS NULL OR starts_at <= now())
+          AND (ends_at IS NULL OR ends_at >= now())
+        ORDER BY created_at DESC`
+    );
+    const out = [];
+    for (const ch of challenges) {
+      const { rows: pr } = await pool.query('SELECT * FROM challenge_participants WHERE challenge_id = $1 AND user_id = $2', [ch.id, req.user.id]);
+      let participation = pr[0] || null;
+      if (participation) participation = await evaluateParticipation(participation, ch);
+      out.push({ ...ch, participation });
+    }
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load challenges', details: err.message });
+  }
+});
+
+// POST /api/challenges/:id/join — opt in; snapshots the baseline metric.
+app.post('/api/challenges/:id/join', authMiddleware, async (req, res) => {
+  try {
+    const { rows: chs } = await pool.query("SELECT * FROM challenges WHERE id = $1 AND status = 'active'", [req.params.id]);
+    const ch = chs[0];
+    if (!ch) return res.status(404).json({ error: 'Challenge not found or not active' });
+    if (ch.ends_at && new Date(ch.ends_at).getTime() < Date.now()) return res.status(400).json({ error: 'Challenge has ended' });
+    const baseline = await measureMetric(req.user.id, ch.goal_type);
+    const { rows } = await pool.query(
+      `INSERT INTO challenge_participants (challenge_id, user_id, baseline, progress)
+       VALUES ($1, $2, $3, 0)
+       ON CONFLICT (challenge_id, user_id) DO NOTHING
+       RETURNING *`,
+      [req.params.id, req.user.id, baseline]
+    );
+    res.status(201).json({ success: true, participation: rows[0] || null });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to join challenge', details: err.message });
+  }
+});
+
+// POST /api/admin/challenges — create a challenge (admin).
+app.post('/api/admin/challenges', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { title, description, goal_type, goal_target, reward_type, reward_value, ends_at } = req.body || {};
+    if (!title || !CHALLENGE_GOALS.includes(goal_type) || !CHALLENGE_REWARDS.includes(reward_type)) {
+      return res.status(400).json({ error: 'title, a valid goal_type and reward_type are required', goals: CHALLENGE_GOALS, rewards: CHALLENGE_REWARDS });
+    }
+    const { rows } = await pool.query(
+      `INSERT INTO challenges (title, description, goal_type, goal_target, reward_type, reward_value, ends_at, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [title, description || null, goal_type, Math.max(1, parseInt(goal_target, 10) || 1), reward_type, Number(reward_value) || 0, ends_at || null, req.user.id]
+    );
+    res.status(201).json({ challenge: rows[0] });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create challenge', details: err.message });
+  }
+});
+
+// GET /api/admin/challenges — all challenges with participant/winner counts.
+app.get('/api/admin/challenges', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, title, description, stake_amount, reward_amount, target_date, status, created_at, completed_at
-       FROM commitments WHERE user_id = $1 ORDER BY created_at DESC`,
-      [req.user.id]
+      `SELECT c.*,
+        (SELECT COUNT(*)::int FROM challenge_participants p WHERE p.challenge_id = c.id) AS participants,
+        (SELECT COUNT(*)::int FROM challenge_participants p WHERE p.challenge_id = c.id AND p.status = 'rewarded') AS winners
+       FROM challenges c ORDER BY c.created_at DESC`
     );
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to load commitments', details: err.message });
+    res.status(500).json({ error: 'Failed to load challenges', details: err.message });
   }
 });
 
-// POST /api/biz/commitments
-app.post('/api/biz/commitments', authMiddleware, async (req, res) => {
+// DELETE /api/admin/challenges/:id
+app.delete('/api/admin/challenges/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { title, description, stake_amount, reward_amount, target_date } = req.body;
-    if (!title || !target_date) return res.status(400).json({ error: 'Title and target date are required' });
-    const { rows } = await pool.query(
-      `INSERT INTO commitments (user_id, title, description, stake_amount, reward_amount, target_date)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, title, description, stake_amount, reward_amount, target_date, status, created_at, completed_at`,
-      [req.user.id, title, description, stake_amount || 0, reward_amount || 0, target_date]
-    );
-    await recordInfluence(req.user.id, 'commitment_stake', { target: String(rows[0].id), metadata: { stake_amount: stake_amount || 0 } });
-    res.status(201).json({ commitment: rows[0] });
+    await pool.query('DELETE FROM challenges WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to create commitment', details: err.message });
-  }
-});
-
-// POST /api/biz/commitments/:id/complete
-app.post('/api/biz/commitments/:id/complete', authMiddleware, async (req, res) => {
-  try {
-    const { rows } = await pool.query('SELECT id, status, reward_amount FROM commitments WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
-    const commitment = rows[0];
-    if (!commitment) return res.status(404).json({ error: 'Commitment not found' });
-    if (commitment.status !== 'active') return res.status(400).json({ error: 'Commitment already completed' });
-
-    await pool.query('UPDATE commitments SET status = $1, completed_at = NOW() WHERE id = $2', ['completed', req.params.id]);
-    await pool.query('INSERT INTO transactions (user_id, type, amount, status, description) VALUES ($1, $2, $3, $4, $5)',
-      [req.user.id, 'subscription', commitment.reward_amount, 'paid', `Completed commitment reward`]
-    );
-    await recordInfluence(req.user.id, 'commitment_payout', { target: String(commitment.id), metadata: { reward_amount: commitment.reward_amount } });
-
-    res.json({ success: true, completed_at: new Date().toISOString() });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to complete commitment', details: err.message });
+    res.status(500).json({ error: 'Failed to delete challenge', details: err.message });
   }
 });
 
@@ -1277,6 +1616,82 @@ app.get('/api/biz/resonance', authMiddleware, async (req, res) => {
   }
 });
 
+// GET /api/biz/adaptive-price — the caller's resonance-based discount + adjusted prices.
+app.get('/api/biz/adaptive-price', authMiddleware, async (req, res) => {
+  try {
+    const score = await resonanceScore(req.user.id);
+    const pct = adaptiveDiscount(score);
+    const apply = (p) => Math.round(p * (1 - pct) * 100) / 100;
+    res.json({
+      resonance: Math.round(score * 100) / 100,
+      discount_pct: Math.round(pct * 100),
+      plans: { influence: { base: 19, price: apply(19) }, pro: { base: 49, price: apply(49) } },
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// GET /api/biz/insights — adaptive insights (the partner/data product). Partners + admins.
+app.get('/api/biz/insights', authMiddleware, async (req, res) => {
+  try {
+    const { rows: u } = await pool.query('SELECT role, is_partner FROM users WHERE id = $1', [req.user.id]);
+    if (!(u[0]?.role === 'admin' || u[0]?.is_partner)) return res.status(403).json({ error: 'partner_required' });
+    const [evt, modules, fund] = await Promise.all([
+      pool.query("SELECT event_type, COUNT(*)::int AS count, COALESCE(SUM(weight),0)::numeric(12,2) AS weight FROM influence_events GROUP BY event_type ORDER BY weight DESC"),
+      pool.query("SELECT title, COALESCE(adoption_count,0) AS adoption_count FROM licensed_assets ORDER BY adoption_count DESC LIMIT 5"),
+      adaptiveFundBalance(),
+    ]);
+    res.json({ events_by_type: evt.rows, top_modules: modules.rows, fund_balance: fund });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// GET /api/admin/adaptive-fund — balance + recent ledger (admin).
+app.get('/api/admin/adaptive-fund', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const balance = await adaptiveFundBalance();
+    const { rows } = await pool.query('SELECT direction, amount, user_id, reason, created_at FROM adaptive_fund ORDER BY id DESC LIMIT 20');
+    res.json({ balance, entries: rows });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// POST /api/admin/adaptive-fund/reallocate — reinvest the balance into the highest-
+// resonance users (partners weighted 1.5×) as account credit. "Natural selection."
+app.post('/api/admin/adaptive-fund/reallocate', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const balance = await adaptiveFundBalance();
+    if (balance <= 0) return res.json({ success: true, distributed: 0, recipients: [] });
+    const N = Math.max(1, Math.min(parseInt(req.body?.top, 10) || 5, 50));
+    const { rows: top } = await pool.query(
+      `SELECT e.user_id, u.is_partner,
+              SUM(e.weight * power(0.5, EXTRACT(EPOCH FROM (now() - e.created_at)) / (86400 * 30))) AS score
+         FROM influence_events e JOIN users u ON u.id = e.user_id
+        GROUP BY e.user_id, u.is_partner ORDER BY score DESC LIMIT $1`,
+      [N]
+    );
+    const weighted = top.map(r => ({ user_id: r.user_id, w: Number(r.score) * (r.is_partner ? 1.5 : 1) }));
+    const sum = weighted.reduce((s, r) => s + r.w, 0);
+    if (sum <= 0) return res.json({ success: true, distributed: 0, recipients: [] });
+    const recipients = [];
+    for (const r of weighted) {
+      const amt = Math.round(balance * (r.w / sum) * 100) / 100;
+      if (amt <= 0) continue;
+      await pool.query('UPDATE users SET account_credit = COALESCE(account_credit,0) + $1 WHERE id = $2', [amt, r.user_id]);
+      await pool.query("INSERT INTO adaptive_fund (direction, amount, user_id, reason) VALUES ('out', $1, $2, 'reallocation')", [amt, r.user_id]);
+      await pool.query("INSERT INTO transactions (user_id, type, amount, status, description) VALUES ($1, 'payout', $2, 'paid', 'Adaptive fund subsidy')", [r.user_id, amt]);
+      await recordInfluence(r.user_id, 'engagement', { target: 'adaptive_fund', metadata: { subsidy: amt } });
+      recipients.push({ user_id: r.user_id, amount: amt });
+    }
+    res.json({ success: true, distributed: recipients.reduce((s, x) => s + x.amount, 0), recipients });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to reallocate', details: err.message });
+  }
+});
+
 // ── Custom domain verification ───────────────────────────────────────────────
 
 const APEX_TARGET = process.env.CAPABLE_APEX || 'capable.app';
@@ -1291,6 +1706,11 @@ app.post('/api/projects/:id/domain/instructions', authMiddleware, async (req, re
     if (rows.length === 0) return res.status(404).json({ error: 'Project not found' });
     const project = rows[0];
     if (!project.custom_domain) return res.status(400).json({ error: 'No custom domain set on this project' });
+
+    const { rows: u } = await pool.query('SELECT plan FROM users WHERE id = $1', [req.user.id]);
+    if (customDomainLimit(u[0]?.plan) <= 0) {
+      return res.status(403).json({ error: 'upgrade_required', message: 'Custom domains are available on paid plans.' });
+    }
 
     let token = project.domain_verification_token;
     if (!token) {
@@ -1368,39 +1788,12 @@ app.delete('/api/projects/:id/domain', authMiddleware, async (req, res) => {
 // when present, with a fresh unique slug so the clone is its own live site.
 app.post('/api/projects/:id/clone', authMiddleware, async (req, res) => {
   try {
-    const { rows: sourceRows } = await pool.query('SELECT * FROM projects WHERE id = $1 AND (user_id = $2 OR is_public = true)', [req.params.id, req.user.id]);
-    const source = sourceRows[0];
-    if (!source) return res.status(404).json({ error: 'Project not found' });
+    const { rows: sourceRows } = await pool.query('SELECT id FROM projects WHERE id = $1 AND (user_id = $2 OR is_public = true)', [req.params.id, req.user.id]);
+    if (!sourceRows[0]) return res.status(404).json({ error: 'Project not found' });
 
-    const hasBlueprint = !!source.blueprint;
-    const cloneName = `${source.name} (Clone)`;
-    let newSlug = null;
-    if (hasBlueprint) {
-      const seed = source.blueprint.project_name_en || source.blueprint.project_name || cloneName;
-      newSlug = await uniqueSlug(seed);
-    }
-
-    const { rows: newProjRows } = await pool.query(
-      `INSERT INTO projects (user_id, name, description, thumbnail_url, price, code, blueprint,
-                             author, is_public, is_published, published_slug, last_edited, updated_at)
-       VALUES ($1, $2, $3, $4, 0, $5, $6, $7, false, $8, $9, NOW(), NOW()) RETURNING id`,
-      [
-        req.user.id, cloneName, source.description, source.thumbnail_url,
-        source.code, source.blueprint || null, req.user.name,
-        hasBlueprint, newSlug,
-      ]
-    );
-    const newProjectId = newProjRows[0].id;
-
-    const { rows: sourceFiles } = await pool.query('SELECT * FROM project_files WHERE project_id = $1', [source.id]);
-    for (const file of sourceFiles) {
-      await pool.query(
-        'INSERT INTO project_files (project_id, filename, content, file_type) VALUES ($1, $2, $3, $4)',
-        [newProjectId, file.filename, file.content, file.file_type]
-      );
-    }
-
-    res.status(201).json({ id: newProjectId, has_blueprint: hasBlueprint, slug: newSlug });
+    const clone = await cloneProjectForUser(req.params.id, req.user.id, req.user.name);
+    if (!clone) return res.status(404).json({ error: 'Project not found' });
+    res.status(201).json(clone);
   } catch (err) {
     res.status(500).json({ error: 'Failed to clone', details: err.message });
   }
@@ -1686,7 +2079,8 @@ app.post('/api/generate', authMiddleware, async (req, res) => {
     const { rows: userRows } = await pool.query('SELECT tokens_used, tokens_limit, plan FROM users WHERE id = $1', [req.user.id]);
     const user = userRows[0];
 
-    const monthlyBudget = monthlyTokenBudget(user.plan);
+    let monthlyBudget = monthlyTokenBudget(user.plan);
+    if (Number.isFinite(monthlyBudget)) monthlyBudget += await getMonthlyTokenGrants(pool, req.user.id); // challenge-win bonus
     const monthlyUsed = Number.isFinite(monthlyBudget) ? await getMonthlyTokens(pool, req.user.id) : 0;
     if (Number.isFinite(monthlyBudget) && monthlyUsed >= monthlyBudget) {
       return res.status(429).json({
@@ -2115,8 +2509,9 @@ app.post('/api/ai/generate', authMiddleware, async (req, res) => {
     const user = userRows[0];
     if (!user) return res.status(404).json({ error: 'User not found' });
     // Monthly compute ceiling (the real margin guardrail) — resets each calendar month.
-    const monthlyBudget = monthlyTokenBudget(user.plan);
+    let monthlyBudget = monthlyTokenBudget(user.plan);
     if (Number.isFinite(monthlyBudget)) {
+      monthlyBudget += await getMonthlyTokenGrants(pool, req.user.id); // challenge-win bonus tokens
       const monthlyUsed = await getMonthlyTokens(pool, req.user.id);
       if (monthlyUsed >= monthlyBudget) {
         return res.status(402).json({
@@ -2557,7 +2952,7 @@ app.get('/api/admin/overview', authMiddleware, adminMiddleware, async (req, res)
 app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT u.id, u.email, u.name, u.plan, u.role, u.created_at,
+      `SELECT u.id, u.email, u.name, u.plan, u.role, u.is_partner, u.created_at,
               COUNT(p.id)::int AS project_count,
               COALESCE(SUM(t.amount) FILTER (WHERE t.type IN ('subscription','template_sale','manual_income')),0)::float AS revenue
          FROM users u
@@ -2575,11 +2970,11 @@ app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) =>
 // PATCH /api/admin/users/:id — change plan or role
 app.patch('/api/admin/users/:id', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { plan, role } = req.body;
+    const { plan, role, is_partner } = req.body;
     const { rows } = await pool.query(
-      `UPDATE users SET plan = COALESCE($1, plan), role = COALESCE($2, role)
-        WHERE id = $3 RETURNING id, email, name, plan, role`,
-      [plan ?? null, role ?? null, req.params.id]
+      `UPDATE users SET plan = COALESCE($1, plan), role = COALESCE($2, role), is_partner = COALESCE($3, is_partner)
+        WHERE id = $4 RETURNING id, email, name, plan, role, is_partner`,
+      [plan ?? null, role ?? null, typeof is_partner === 'boolean' ? is_partner : null, req.params.id]
     );
     if (!rows[0]) return res.status(404).json({ error: 'User not found' });
     res.json(rows[0]);

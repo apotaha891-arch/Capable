@@ -1,6 +1,8 @@
 // Arabic translations
 const ar = {
 
+  lang: 'ar',  // language code — used by components doing t('lang') === 'ar' checks
+
   // -- Merged from business-model branch: pricing + dashboard credits --
   aiCredits: 'أرصدة التصميم الذكي',
   aiCreditsDesc: 'تُستخدم عند قيام الذكاء الاصطناعي بالبناء. النقر والتعديل والتخصيص غير محدود دائماً.',

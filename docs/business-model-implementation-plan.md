@@ -68,6 +68,19 @@ has a live resonance score.
   `capable_deploy_slot_monthly`, quantity-adjustable). Enforced in both publish paths
   (402 `deploy_limit_reached`); purchase flow in `ProjectPanel`.
 
+## Custom-domain monetization ✅ DONE (Workstream C)
+
+Custom-domain infra already existed (DNS TXT verify + host routing). Added the
+**billing/gating layer**, no separate charge — bundled into plans:
+- **free**: locked (set-domain → 403 `upgrade_required`; UI shows upgrade card).
+- **Influence ($19)**: **1** custom domain, served with a **"Powered by Capable"**
+  badge (viral hook) injected at serve time.
+- **Pro/enterprise ($49+)**: unlimited custom domains, **unbranded**.
+- Plan caps in `PLAN_LIMITS` (`customDomains`, `domainBranded`); gated at set-domain
+  (PUT), DNS-instructions, and **serve time** (host routing checks the owner's plan,
+  so a downgrade stops serving the domain and re-adds the badge). 402
+  `domain_limit_reached` when over the plan's count.
+
 ## Workstream B — Real payments ✅ DONE
 
 Same as any monetization: there is no processor today.
@@ -99,7 +112,23 @@ decisions, billed monthly.
 
 ---
 
-## Workstream D — Behavioral commitment vaults (stream 2)
+## Workstream D — Challenges (replaces commitment vaults) ✅ DONE
+
+Pivoted away from user-staked commitments (weak incentive, reversed economics, escrow
+legal risk). Replaced with **admin-issued challenges**:
+- Admin creates a challenge: title, measurable goal (`publish_count` / `project_count`
+  / `generation_count`) + target, reward (**tokens** / **subscription credit** /
+  **cash** — chosen per challenge), optional end date.
+- Users join (`/challenges`); progress is measured automatically from real activity
+  (current metric − baseline-at-join); on hitting the goal in-window the reward is
+  granted automatically (idempotent).
+- Rewards: tokens → `token_grants` added to the monthly budget; credit →
+  `users.account_credit`; cash → a `pending` payout transaction for an admin.
+- Tables: `challenges`, `challenge_participants`, `token_grants`. Admin UI:
+  `ChallengesTab`. User UI: `ChallengesPage` (`/challenges`; `/commitment` redirects).
+- Old `/api/biz/commitments*` routes removed; `challenge_win` influence event added.
+
+### Superseded — Workstream D (old): Behavioral commitment vaults (stream 2)
 
 `commitments` table + endpoints exist (stake_amount, reward_amount, target_date).
 Gaps that make it a real "vault":
@@ -119,7 +148,22 @@ forfeit-on-miss job.
 
 ---
 
-## Workstream E — Meme-based licensing (stream 3)
+## Workstream E — Meme-based licensing ✅ DONE
+
+Turned the marketplace into real creator-listed modules with clone-based adoption:
+- **List a project**: `POST /api/biz/assets` lets a user publish one of their own
+  projects as a licensable module (`creator_id`, `project_id`, price). UI: "List a
+  project" form on `MarketplacePage`.
+- **Adoption = clone**: buying/adopting a module deep-copies the linked project into
+  the buyer's account (shared `cloneProjectForUser`, reused by the clone route).
+- **Fitness ranking**: `adoption_count` bumped per adoption; `GET /api/biz/assets`
+  orders by it; cards show a 🔥 count + creator name.
+- **Creator payout**: `LICENSE_CREATOR_SHARE = 0.7` → creator gets 70% as
+  `account_credit` + a `payout` transaction; platform keeps 30%. Buyer + creator both
+  get `meme_license` influence. Works on free/simulated and Stripe-webhook paths.
+- Schema: `licensed_assets` + `creator_id`, `project_id`, `adoption_count`.
+
+### Original notes — Workstream E (meme-based licensing, stream 3)
 
 `licensed_assets` + `MarketplacePage` exist. Turn it into propagation revenue:
 
@@ -135,7 +179,27 @@ forfeit-on-miss job.
 
 ---
 
-## Workstream F — Ecosystem fitness subsidies + adaptive fund (stream 4; not started)
+## Workstream F — Ecosystem partners + adaptive fund ✅ DONE
+
+- **Partners**: `users.is_partner` (admin-granted via UsersTab toggle). Partners unlock
+  the **adaptive insights** product (`GET /api/biz/insights`: influence-by-type, top
+  modules by fitness, fund balance) and are weighted **1.5×** in fund reallocation.
+- **Adaptive fund**: `adaptive_fund` ledger. **10%** of platform revenue (subscriptions
+  + the platform's license cut) auto-contributes (`contributeToFund`). Admin
+  `POST /api/admin/adaptive-fund/reallocate` reinvests the whole balance into the
+  highest-resonance users (partners weighted) as account credit — "natural selection."
+- Admin UI: **Ecosystem tab** (balance, reallocate, insights).
+
+## Workstream G — Adaptive (resonance) pricing ✅ DONE
+
+- `adaptiveDiscount(resonance)`: ≥5 → 5%, ≥20 → 10%, ≥50 → 15%. Engagement "collapses"
+  pricing in the user's favor.
+- Applied to **subscriptions** (simulated amount; real Stripe via a dynamically-created
+  `percent_off` coupon) and **marketplace adoption** (discounted `unit_amount`).
+- `GET /api/biz/adaptive-price` surfaces the user's discount + adjusted plan prices;
+  shown on `InfluencePage` ("Your resonance earns N% off").
+
+### Original notes — Workstream F (stream 4) / Workstream G
 
 This is the entirely-missing partner layer — the model's stream 4.
 

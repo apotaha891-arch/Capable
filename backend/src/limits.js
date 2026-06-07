@@ -10,11 +10,14 @@
 //   • monthlyTokens     — hard monthly compute ceiling (the real margin guardrail)
 //   • maxOutputTokens   — extended context/output budget per generation
 //   • priority          — elevated/instant processing (forward hook; no queue yet)
+//   • customDomains — how many custom domains the plan may use (0 = locked)
+//   • domainBranded — whether served custom-domain pages carry a "Powered by
+//                      Capable" badge (the $19 viral hook; Pro is unbranded)
 export const PLAN_LIMITS = {
-  free:       { generationsPerDay: 2,        maxProjects: 1,        deploysIncluded: 1,        monthlyTokens: 150000,   maxOutputTokens: 16384, priority: false },
-  influence:  { generationsPerDay: 8,        maxProjects: 5,        deploysIncluded: 2,        monthlyTokens: 1200000,  maxOutputTokens: 32768, priority: false },
-  pro:        { generationsPerDay: 32,       maxProjects: 25,       deploysIncluded: 10,       monthlyTokens: 5000000,  maxOutputTokens: 65536, priority: true  }, // 4× Influence compute
-  enterprise: { generationsPerDay: Infinity, maxProjects: Infinity, deploysIncluded: Infinity, monthlyTokens: Infinity, maxOutputTokens: 65536, priority: true  },
+  free:       { generationsPerDay: 2,        maxProjects: 1,        deploysIncluded: 1,        monthlyTokens: 150000,   maxOutputTokens: 16384, priority: false, customDomains: 0,        domainBranded: true  },
+  influence:  { generationsPerDay: 8,        maxProjects: 5,        deploysIncluded: 2,        monthlyTokens: 1200000,  maxOutputTokens: 32768, priority: false, customDomains: 1,        domainBranded: true  },
+  pro:        { generationsPerDay: 32,       maxProjects: 25,       deploysIncluded: 10,       monthlyTokens: 5000000,  maxOutputTokens: 65536, priority: true,  customDomains: Infinity, domainBranded: false }, // 4× Influence compute, unbranded
+  enterprise: { generationsPerDay: Infinity, maxProjects: Infinity, deploysIncluded: Infinity, monthlyTokens: Infinity, maxOutputTokens: 65536, priority: true,  customDomains: Infinity, domainBranded: false },
 };
 
 export function planLimits(plan) {
@@ -42,17 +45,38 @@ export async function getMonthlyTokens(pool, userId) {
   return Number(rows[0].used);
 }
 
+// Bonus tokens granted this month (e.g. challenge wins) — added to the plan budget.
+export async function getMonthlyTokenGrants(pool, userId) {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(SUM(amount), 0)::bigint AS g
+       FROM token_grants
+      WHERE user_id = $1 AND created_at >= date_trunc('month', now())`,
+    [userId]
+  );
+  return Number(rows[0].g);
+}
+
 // Deployable-project cap = plan's included slots + any purchased extra slots.
 export function effectiveDeployLimit(plan, extraSlots = 0) {
   const inc = planLimits(plan).deploysIncluded;
   return inc === Infinity ? Infinity : inc + (extraSlots || 0);
 }
 
+// How many custom domains a plan allows (0 = feature locked).
+export function customDomainLimit(plan) {
+  return planLimits(plan).customDomains;
+}
+
+// Whether a plan's custom-domain pages carry the "Powered by Capable" badge.
+export function domainBranded(plan) {
+  return planLimits(plan).domainBranded;
+}
+
 // Current usage vs. the plan's limits. generations_today counts successful blueprint
 // generations today; projects_count is created projects; deploys_count is published.
 export async function getUsage(pool, userId, plan, extraSlots = 0) {
   const limits = planLimits(plan);
-  const [{ rows: g }, { rows: p }, { rows: pub }, monthlyUsed] = await Promise.all([
+  const [{ rows: g }, { rows: p }, { rows: pub }, monthlyUsed, monthlyGrants] = await Promise.all([
     pool.query(
       `SELECT COUNT(*)::int AS c FROM token_usage
         WHERE user_id = $1 AND action = 'blueprint_generate'
@@ -62,6 +86,7 @@ export async function getUsage(pool, userId, plan, extraSlots = 0) {
     pool.query('SELECT COUNT(*)::int AS c FROM projects WHERE user_id = $1', [userId]),
     pool.query('SELECT COUNT(*)::int AS c FROM projects WHERE user_id = $1 AND is_published = true', [userId]),
     getMonthlyTokens(pool, userId),
+    getMonthlyTokenGrants(pool, userId),
   ]);
   const deployLimit = effectiveDeployLimit(plan, extraSlots);
   return {
@@ -73,7 +98,10 @@ export async function getUsage(pool, userId, plan, extraSlots = 0) {
     deploys_count: pub[0].c,
     deploys_limit: deployLimit === Infinity ? null : deployLimit,
     monthly_tokens_used: monthlyUsed,
-    monthly_tokens_limit: limits.monthlyTokens === Infinity ? null : limits.monthlyTokens,
+    monthly_tokens_limit: limits.monthlyTokens === Infinity ? null : limits.monthlyTokens + monthlyGrants,
+    monthly_tokens_bonus: monthlyGrants,
+    custom_domains_limit: limits.customDomains === Infinity ? null : limits.customDomains,
+    domain_branded: limits.domainBranded,
     priority: limits.priority,
   };
 }

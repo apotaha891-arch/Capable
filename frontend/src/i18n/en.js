@@ -1,6 +1,8 @@
 // English translations
 const en = {
 
+  lang: 'en',  // language code — used by components doing t('lang') === 'ar' checks
+
   // -- Merged from business-model branch: pricing + dashboard credits --
   aiCredits: 'AI Design Credits',
   aiCreditsDesc: 'Used when the AI builds for you. Clicking, editing text, and customizing are always unlimited.',

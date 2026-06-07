@@ -231,8 +231,8 @@ export default function Dashboard() {
             <Link to="/influence" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
               <Sparkles size={14} /> {lang === 'ar' ? 'تأثير' : 'Influence Pass'}
             </Link>
-            <Link to="/commitment" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
-              <Target size={14} /> {lang === 'ar' ? 'التزام' : 'Commitment Vault'}
+            <Link to="/challenges" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
+              <Target size={14} /> {lang === 'ar' ? 'التحديات' : 'Challenges'}
             </Link>
             <Link to="/marketplace" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
               <Tag size={14} /> {lang === 'ar' ? 'السوق' : 'Marketplace'}

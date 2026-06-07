@@ -13,7 +13,7 @@ import BlueprintEditor from './pages/BlueprintEditor.jsx';
 import Admin from './pages/Admin.jsx';
 import ProjectPanel from './pages/ProjectPanel.jsx';
 import InfluencePage from './pages/InfluencePage.jsx';
-import CommitmentPage from './pages/CommitmentPage.jsx';
+import ChallengesPage from './pages/ChallengesPage.jsx';
 import MarketplacePage from './pages/MarketplacePage.jsx';
 
 // Protected route wrapper
@@ -53,7 +53,8 @@ function AppRoutes() {
       <Route path="/blueprint/:id" element={<ProtectedRoute><BlueprintEditor /></ProtectedRoute>} />
       <Route path="/project/:id" element={<ProtectedRoute><ProjectPanel /></ProtectedRoute>} />
       <Route path="/influence" element={<ProtectedRoute><InfluencePage /></ProtectedRoute>} />
-      <Route path="/commitment" element={<ProtectedRoute><CommitmentPage /></ProtectedRoute>} />
+      <Route path="/challenges" element={<ProtectedRoute><ChallengesPage /></ProtectedRoute>} />
+      <Route path="/commitment" element={<Navigate to="/challenges" replace />} />
       <Route path="/marketplace" element={<ProtectedRoute><MarketplacePage /></ProtectedRoute>} />
       <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { LayoutDashboard, Users, FolderOpen, MessageSquare, DollarSign, Shield, ArrowLeft } from 'lucide-react';
+import { LayoutDashboard, Users, FolderOpen, MessageSquare, DollarSign, Shield, ArrowLeft, Trophy, Boxes } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
@@ -9,6 +9,8 @@ import UsersTab from '../admin/UsersTab.jsx';
 import ContentTab from '../admin/ContentTab.jsx';
 import CrmTab from '../admin/CrmTab.jsx';
 import FinanceTab from '../admin/FinanceTab.jsx';
+import ChallengesTab from '../admin/ChallengesTab.jsx';
+import EcosystemTab from '../admin/EcosystemTab.jsx';
 
 export default function Admin() {
   const { t, lang, isRTL } = useLang();
@@ -21,6 +23,8 @@ export default function Admin() {
     { id: 'content', label: t('adminContent'), icon: FolderOpen, Comp: ContentTab },
     { id: 'crm', label: t('adminCrm'), icon: MessageSquare, Comp: CrmTab },
     { id: 'finance', label: t('adminFinance'), icon: DollarSign, Comp: FinanceTab },
+    { id: 'challenges', label: lang === 'ar' ? 'التحديات' : 'Challenges', icon: Trophy, Comp: ChallengesTab },
+    { id: 'ecosystem', label: lang === 'ar' ? 'النظام البيئي' : 'Ecosystem', icon: Boxes, Comp: EcosystemTab },
   ];
   const Active = tabs.find(x => x.id === tab).Comp;
 
