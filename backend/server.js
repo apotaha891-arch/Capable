@@ -781,13 +781,56 @@ app.get('/api/projects', authMiddleware, async (req, res) => {
   }
 });
 
+// Floating "Edit with Capable" badge injected into public previews. It drives
+// viewers back to Capable to remix the project. Rendered inside a shadow root so
+// the host page's CSS can't restyle or hide it, with a max z-index so it stays
+// on top. Self-contained: no external requests, safe to inline anywhere.
+function capableEditBadge(projectId) {
+  const href = `${FRONTEND_URL}/builder?ref=preview&from=${encodeURIComponent(projectId)}`;
+  // Single-quoted strings inside so the whole thing embeds cleanly in innerHTML.
+  return `
+<script>(function(){
+  if (window.__capableBadge) return; window.__capableBadge = 1;
+  function mount(){
+    if (!document.body) { return setTimeout(mount, 50); }
+    var host = document.createElement('div');
+    host.setAttribute('dir','ltr');
+    host.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:2147483647;';
+    var root = host.attachShadow ? host.attachShadow({mode:'open'}) : host;
+    root.innerHTML =
+      '<style>'
+      + 'a{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;gap:8px;'
+      + 'cursor:pointer;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;'
+      + 'font-size:14px;font-weight:700;line-height:1;color:#fff;background:#1F4788;'
+      + 'padding:10px 16px;border-radius:9999px;box-shadow:0 6px 20px rgba(31,71,136,.35);'
+      + 'transition:transform .15s ease,background .15s ease;text-decoration:none;}'
+      + 'a:hover{background:#2E5FA3;transform:translateY(-2px);}'
+      + 'svg{display:block;flex:0 0 auto;}'
+      + 'span{white-space:nowrap;}'
+      + '</style>'
+      + '<a href="${href}" target="_blank" rel="noopener noreferrer">'
+      + '<svg width="16" height="16" viewBox="0 0 48 48" fill="none" aria-hidden="true">'
+      + '<path d="M34.71 12.11 A16 16 0 1 0 34.71 35.89" stroke="#fff" stroke-width="6.5" stroke-linecap="round"/>'
+      + '</svg><span>Edit with Capable</span></a>';
+    document.body.appendChild(host);
+  }
+  mount();
+})();</script>`;
+}
+
 // GET /api/projects/preview/:id — serve any public project's HTML for inline preview
 app.get('/api/projects/preview/:id', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT code FROM projects WHERE id = $1 AND is_public = true', [req.params.id]);
     if (rows.length === 0) return res.status(404).send('Not found');
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(rows[0].code);
+    const html = rows[0].code || '';
+    const badge = capableEditBadge(req.params.id);
+    // Inject before </body> when present, otherwise append so it still renders.
+    const out = /<\/body>/i.test(html)
+      ? html.replace(/<\/body>/i, `${badge}</body>`)
+      : html + badge;
+    res.send(out);
   } catch (err) {
     res.status(500).send('Error');
   }
