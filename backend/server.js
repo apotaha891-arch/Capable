@@ -429,8 +429,30 @@ if (!fs.existsSync(thumbnailsDir)) fs.mkdirSync(thumbnailsDir, { recursive: true
 // ── Middleware ────────────────────────────────────────────────────────────────
 // CORS: open by default (auth is via Bearer token, not cookies). In production set
 // CORS_ORIGINS to a comma-separated allowlist, e.g. "https://capable.live".
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
-app.use(cors(CORS_ORIGINS.length ? { origin: CORS_ORIGINS } : {}));
+// Origins are matched after stripping any trailing slash and lowercasing, so a
+// stray "https://capable.live/" in the env var still matches the browser's
+// "https://capable.live" Origin header. Requests with no Origin (curl, health
+// checks, server-to-server) are always allowed.
+const normalizeOrigin = (o) => (o || '').trim().replace(/\/+$/, '').toLowerCase();
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map(normalizeOrigin)
+  .filter(Boolean);
+
+if (CORS_ORIGINS.length) {
+  app.use(cors({
+    origin(origin, callback) {
+      if (!origin || CORS_ORIGINS.includes(normalizeOrigin(origin))) {
+        return callback(null, true);
+      }
+      console.warn(`CORS: blocked origin "${origin}" (allowed: ${CORS_ORIGINS.join(', ')})`);
+      return callback(null, false);
+    },
+  }));
+} else {
+  // No allowlist configured → reflect any origin (dev / open API).
+  app.use(cors());
+}
 
 // Stripe webhook needs the raw body for signature verification, so it is mounted
 // with express.raw BEFORE the global JSON parser. Fulfillment lives in
