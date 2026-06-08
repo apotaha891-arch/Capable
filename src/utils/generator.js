@@ -56,10 +56,11 @@ export function generateSiteFromPrompt(prompt, options = {}) {
 
   // 3. Custom copywriting based on detected category
   let sections = [];
+  let detail = "";
   
   if (lang === "ar") {
     // ARABIC GENERATOR
-    const detail = extractContextDetail(prompt, ["موقع", "إنشاء", "أريد", "تصميم", "شركة", "مطعم", "مقهى", "معرض أعمال", "باللون", "الأحمر", "الأخضر", "الأزرق"], "ar");
+    detail = extractContextDetail(prompt, ["موقع", "إنشاء", "أريد", "تصميم", "شركة", "مطعم", "مقهى", "معرض أعمال", "باللون", "الأحمر", "الأخضر", "الأزرق"], "ar");
     
     if (category === "restaurant") {
       sections = [
@@ -289,7 +290,7 @@ export function generateSiteFromPrompt(prompt, options = {}) {
     }
   } else {
     // ENGLISH GENERATOR
-    const detail = extractContextDetail(prompt, ["website", "create", "i want", "design", "company", "restaurant", "cafe", "portfolio", "with", "color", "red", "green", "blue"], "en");
+    detail = extractContextDetail(prompt, ["website", "create", "i want", "design", "company", "restaurant", "cafe", "portfolio", "with", "color", "red", "green", "blue"], "en");
     
     if (category === "restaurant") {
       sections = [

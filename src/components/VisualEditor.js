@@ -2,6 +2,8 @@
 import { storage } from '../utils/storage.js';
 import { openDeploymentWizard } from './DeploymentWizard.js';
 
+const chatHistories = {};
+
 export function renderVisualEditor(appState, project, onBackToDashboard) {
   const trans = appState.translations;
   const isRTL = appState.lang === 'ar';
@@ -33,6 +35,10 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
             <button class="device-btn" data-device="mobile" title="Mobile View">🤳</button>
           </div>
           
+          <button class="btn btn-secondary btn-sm" id="editor-preview-btn">
+            ${trans.previewNewWindow}
+          </button>
+          
           <button class="btn btn-accent btn-sm" id="editor-deploy-btn">
             🚀 ${trans.deploy}
           </button>
@@ -48,6 +54,7 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
             <button class="sidebar-tab-btn" data-tab="styles">${trans.editorTabStyles}</button>
             <button class="sidebar-tab-btn active" data-tab="sections">${trans.editorTabSections}</button>
             <button class="sidebar-tab-btn" data-tab="integrations">${trans.editorTabIntegrations}</button>
+            <button class="sidebar-tab-btn" data-tab="copilot">🤖 ${trans.editorTabCopilot}</button>
           </div>
           
           <div class="sidebar-content" id="sidebar-content-area">
@@ -98,6 +105,11 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
     // Bind Back Button
     document.getElementById('editor-back-btn').addEventListener('click', () => {
       onBackToDashboard();
+    });
+
+    // Bind Preview Button
+    document.getElementById('editor-preview-btn').addEventListener('click', () => {
+      window.open(`${window.location.origin}${window.location.pathname}#site/${project.id}`, '_blank');
     });
 
     // Bind Device Simulator Buttons
@@ -359,7 +371,379 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
         saveProjectState();
         alert(trans.alertSiteSaved);
       });
+    } else if (activeEditorTab === 'copilot') {
+      renderCopilotTab(container);
     }
+  }
+
+  // --- AI Copilot Sidebar Tab Component ---
+  function renderCopilotTab(container) {
+    if (!chatHistories[project.id]) {
+      chatHistories[project.id] = [
+        { sender: 'assistant', text: trans.copilotGreeting }
+      ];
+    }
+    const history = chatHistories[project.id];
+
+    let messagesHtml = '';
+    history.forEach(msg => {
+      messagesHtml += `
+        <div class="copilot-bubble ${msg.sender}">
+          ${msg.text}
+        </div>
+      `;
+    });
+
+    const currentProvider = localStorage.getItem('copilot_provider') || 'offline';
+    const settingsOpen = localStorage.getItem('copilot_settings_open') === 'true';
+
+    container.innerHTML = `
+      <div class="copilot-chat-container">
+        <!-- Collapsible Settings Panel -->
+        <details class="copilot-settings-details" style="background: var(--bg-base); border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: 8px;" ${settingsOpen ? 'open' : ''}>
+          <summary style="font-size: 0.75rem; font-weight: 700; cursor: pointer; color: var(--text-secondary); user-select: none;">
+            ⚙️ AI Provider (إعدادات الذكاء الاصطناعي)
+          </summary>
+          <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+            <div class="input-group" style="margin-bottom: 0;">
+              <label class="input-label" style="font-size: 0.7rem; color: var(--text-muted);">Provider (المزود)</label>
+              <select class="input-field" id="copilot-provider-select" style="font-size: 0.8rem; padding: 6px 10px;">
+                <option value="offline" ${currentProvider === 'offline' ? 'selected' : ''}>Offline Fallback (محلي بدون إنترنت)</option>
+                <option value="ollama" ${currentProvider === 'ollama' ? 'selected' : ''}>Ollama (Local LLM)</option>
+                <option value="huggingface" ${currentProvider === 'huggingface' ? 'selected' : ''}>Hugging Face API</option>
+              </select>
+            </div>
+            
+            <div id="copilot-settings-hf" style="display: ${currentProvider === 'huggingface' ? 'flex' : 'none'}; flex-direction: column; gap: 8px;">
+              <div class="input-group" style="margin-bottom: 0;">
+                <label class="input-label" style="font-size: 0.7rem; color: var(--text-muted);">API Token (مفتاح API)</label>
+                <input type="password" class="input-field" id="copilot-hf-token" value="${localStorage.getItem('copilot_hf_token') || ''}" placeholder="hf_..." style="font-size: 0.8rem; padding: 6px 10px;" />
+              </div>
+              <div class="input-group" style="margin-bottom: 0;">
+                <label class="input-label" style="font-size: 0.7rem; color: var(--text-muted);">Model ID (الموديل)</label>
+                <input type="text" class="input-field" id="copilot-hf-model" value="${localStorage.getItem('copilot_hf_model') || 'meta-llama/Meta-Llama-3-8B-Instruct'}" style="font-size: 0.8rem; padding: 6px 10px; font-family: monospace;" />
+              </div>
+            </div>
+
+            <div id="copilot-settings-ollama" style="display: ${currentProvider === 'ollama' ? 'flex' : 'none'}; flex-direction: column; gap: 8px;">
+              <div class="input-group" style="margin-bottom: 0;">
+                <label class="input-label" style="font-size: 0.7rem; color: var(--text-muted);">Ollama Host (الرابط)</label>
+                <input type="text" class="input-field" id="copilot-ollama-host" value="${localStorage.getItem('copilot_ollama_host') || 'http://localhost:11434'}" style="font-size: 0.8rem; padding: 6px 10px; font-family: monospace;" />
+              </div>
+              <div class="input-group" style="margin-bottom: 0;">
+                <label class="input-label" style="font-size: 0.7rem; color: var(--text-muted);">Model Name (اسم الموديل)</label>
+                <input type="text" class="input-field" id="copilot-ollama-model" value="${localStorage.getItem('copilot_ollama_model') || 'llama3'}" style="font-size: 0.8rem; padding: 6px 10px; font-family: monospace;" />
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <div class="copilot-messages" id="copilot-msg-stream">
+          ${messagesHtml}
+        </div>
+        
+        <div class="copilot-input-area">
+          <div id="copilot-typing-indicator" style="display: none; margin-bottom: 4px;">
+            <div class="copilot-typing">
+              <span class="spinner" style="width: 12px; height: 12px; border-width: 2px;"></span>
+              <span>${trans.copilotTyping}</span>
+            </div>
+          </div>
+          
+          <div class="copilot-input-row">
+            <textarea class="copilot-textarea" id="copilot-input-field" placeholder="${trans.copilotPlaceholder}"></textarea>
+            <button class="copilot-send-btn" id="copilot-send-btn">
+              ${trans.copilotSend}
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Scroll to bottom
+    const stream = document.getElementById('copilot-msg-stream');
+    if (stream) stream.scrollTop = stream.scrollHeight;
+
+    // Grab elements
+    const detailsEl = container.querySelector('.copilot-settings-details');
+    const providerSelect = document.getElementById('copilot-provider-select');
+    const hfSettings = document.getElementById('copilot-settings-hf');
+    const ollamaSettings = document.getElementById('copilot-settings-ollama');
+    const hfToken = document.getElementById('copilot-hf-token');
+    const hfModel = document.getElementById('copilot-hf-model');
+    const ollamaHost = document.getElementById('copilot-ollama-host');
+    const ollamaModel = document.getElementById('copilot-ollama-model');
+
+    const inputField = document.getElementById('copilot-input-field');
+    const sendBtn = document.getElementById('copilot-send-btn');
+
+    // Bind settings events
+    if (detailsEl) {
+      detailsEl.addEventListener('toggle', () => {
+        localStorage.setItem('copilot_settings_open', detailsEl.open);
+      });
+    }
+
+    if (providerSelect) {
+      providerSelect.addEventListener('change', () => {
+        const val = providerSelect.value;
+        localStorage.setItem('copilot_provider', val);
+        hfSettings.style.display = val === 'huggingface' ? 'flex' : 'none';
+        ollamaSettings.style.display = val === 'ollama' ? 'flex' : 'none';
+      });
+    }
+
+    if (hfToken) {
+      hfToken.addEventListener('change', () => {
+        localStorage.setItem('copilot_hf_token', hfToken.value.trim());
+      });
+    }
+
+    if (hfModel) {
+      hfModel.addEventListener('change', () => {
+        localStorage.setItem('copilot_hf_model', hfModel.value.trim());
+      });
+    }
+
+    if (ollamaHost) {
+      ollamaHost.addEventListener('change', () => {
+        localStorage.setItem('copilot_ollama_host', ollamaHost.value.trim());
+      });
+    }
+
+    if (ollamaModel) {
+      ollamaModel.addEventListener('change', () => {
+        localStorage.setItem('copilot_ollama_model', ollamaModel.value.trim());
+      });
+    }
+
+    const handleSend = () => {
+      const promptText = inputField.value.trim();
+      if (!promptText) return;
+
+      inputField.value = '';
+
+      // Add user message
+      history.push({ sender: 'user', text: promptText });
+      renderCopilotTab(container);
+
+      // Show typing status
+      const typingIndicator = document.getElementById('copilot-typing-indicator');
+      if (typingIndicator) typingIndicator.style.display = 'block';
+
+      const stream = document.getElementById('copilot-msg-stream');
+      if (stream) stream.scrollTop = stream.scrollHeight;
+
+      setTimeout(async () => {
+        let responseText = '';
+        try {
+          responseText = await processCopilotCommandAsync(promptText);
+        } catch (err) {
+          console.warn("AI LLM failed, falling back to offline parser:", err);
+          const offlineResponse = processCopilotCommand(promptText);
+          const isAR = appState.lang === 'ar';
+          responseText = isAR 
+            ? `⚠️ (فشل الاتصال بالنموذج: ${err.message}. تم استخدام المحلل المحلي الاحتياطي.)\n\n${offlineResponse}`
+            : `⚠️ (API Connection failed: ${err.message}. Offline fallback used.)\n\n${offlineResponse}`;
+        }
+        
+        if (typingIndicator) typingIndicator.style.display = 'none';
+
+        // Add assistant message
+        history.push({ sender: 'assistant', text: responseText });
+        renderCopilotTab(container);
+      }, 500);
+    };
+
+    sendBtn.addEventListener('click', handleSend);
+    inputField.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSend();
+      }
+    });
+  }
+
+  // --- AI Copilot Natural Language Parser & Action Handler ---
+  function processCopilotCommand(text) {
+    const isAR = appState.lang === 'ar';
+    const trans = appState.translations;
+
+    // Helper: Normalize string (handles Arabic Alif, Teh Marbuta, Yeh, and diacritics)
+    const normalize = (str) => {
+      if (!str) return "";
+      return str.toLowerCase().trim()
+        .replace(/[أإآ]/g, 'ا')
+        .replace(/ة/g, 'ه')
+        .replace(/ى/g, 'ي')
+        .replace(/[\u064B-\u065F]/g, '');
+    };
+
+    const normalizedInput = normalize(text);
+    
+    // Helper to check if a keyword matches
+    const hasWord = (keywords) => {
+      const normalizedKeywords = keywords.map(k => normalize(k));
+      return normalizedKeywords.some(k => normalizedInput.includes(k));
+    };
+
+    // Special context handler for incomplete name/title complaints
+    if (hasWord(['ناقص', 'مفقود', 'غير مكتمل', 'ناقصه', 'مبتور', 'تكملة', 'تكمله']) && hasWord(['اسم', 'عنوان', 'المنشاه', 'الشركة', 'الموقع', 'المؤسسة'])) {
+      return isAR
+        ? "عذراً على ذلك! يبدو أن اسم المنشأة غير مكتمل بالفعل في عنوان الموقع.\n\nيرجى كتابة الاسم الذي تريده بوضوح مع أمر التعديل، مثل:\n• **'غير الاسم إلى مكتب الهدى للمحاماة'**\n• **'تعديل العنوان إلى مكتب المحاماة والاستشارات'**"
+        : "Apologies! It seems the name is incomplete. Please type the correct name clearly with the edit command, for example:\n• **'change name to Al-Huda Law Firm'**\n• **'edit title to Law & Consultations Office'**";
+    }
+
+    // 1. Rename website title
+    if (hasWord(['اسم', 'تسمية', 'تسميه']) && hasWord(['تغيير', 'تعديل', 'غير', 'بدل', 'سمى', 'تحديث', 'تسميه', 'تسمية'])) {
+      let newName = '';
+      if (isAR) {
+        const matches = text.match(/(?:إلى|الى|هو)\s+(.+)$/i);
+        if (matches) newName = matches[1].trim();
+      } else {
+        const matches = text.match(/(?:to|is)\s+(.+)$/i);
+        if (matches) newName = matches[1].trim();
+      }
+
+      if (newName) {
+        project.name = newName;
+        const titleEl = document.getElementById('editor-project-title');
+        if (titleEl) titleEl.innerText = newName;
+        saveProjectState();
+        return trans.copilotSuccessRename;
+      }
+    }
+
+    // 2. Change Color Theme style
+    if (hasWord(['لون', 'الوان', 'مظهر', 'ثيم', 'شكل'])) {
+      let newTheme = null;
+      if (hasWord(['بنفسجي', 'ميدنايت', 'الليل', 'غامق', 'مظلم'])) {
+        newTheme = 'theme-midnight';
+      } else if (hasWord(['اخضر', 'زمرد', 'طبيعي', 'بيج'])) {
+        newTheme = 'theme-emerald';
+      } else if (hasWord(['برتقالي', 'غروب', 'دافئ', 'احمر'])) {
+        newTheme = 'theme-sunset';
+      } else if (hasWord(['ازرق', 'رسمي', 'شركات', 'عملي'])) {
+        newTheme = 'theme-corporate';
+      }
+
+      if (newTheme) {
+        project.theme = newTheme;
+        saveProjectState();
+        renderCanvasPreview();
+        return trans.copilotSuccessTheme;
+      }
+    }
+
+    // 3. Change Font typography
+    if (hasWord(['خط', 'الخط'])) {
+      let newFont = null;
+      if (hasWord(['عربي', 'بلد', 'القاهرة', 'cairo'])) {
+        newFont = 'font-arabic';
+      } else if (hasWord(['انجليزي', 'لاتيني', 'outfit'])) {
+        newFont = 'font-english';
+      }
+
+      if (newFont) {
+        project.font = newFont;
+        saveProjectState();
+        renderCanvasPreview();
+        return trans.copilotSuccessFont;
+      }
+    }
+
+    // 4. Delete section
+    if (hasWord(['احذف', 'حذف', 'ازالة', 'مسح'])) {
+      let typeToDelete = null;
+      if (hasWord(['هيرو', 'بطل', 'واجه', 'رئيسي'])) {
+        typeToDelete = 'hero';
+      } else if (hasWord(['مميزات', 'خدمات', 'ميزات'])) {
+        typeToDelete = 'features';
+      } else if (hasWord(['معرض', 'صور', 'البوم'])) {
+        typeToDelete = 'gallery';
+      } else if (hasWord(['اتصال', 'حجز', 'نموذج'])) {
+        typeToDelete = 'contact';
+      } else if (hasWord(['تذييل', 'اخير', 'روابط'])) {
+        typeToDelete = 'footer';
+      }
+
+      if (typeToDelete) {
+        const idx = project.sections.findIndex(s => s.type === typeToDelete);
+        if (idx !== -1) {
+          project.sections.splice(idx, 1);
+          saveProjectState();
+          renderCanvasPreview();
+          return trans.copilotSuccessSectionDel;
+        }
+      }
+    }
+
+    // 5. Add section
+    if (hasWord(['اضف', 'اضافه', 'وضع', 'جديد'])) {
+      let typeToAdd = null;
+      if (hasWord(['هيرو', 'بطل', 'واجه', 'رئيسي'])) {
+        typeToAdd = 'hero';
+      } else if (hasWord(['مميزات', 'خدمات', 'ميزات'])) {
+        typeToAdd = 'features';
+      } else if (hasWord(['معرض', 'صور', 'البوم'])) {
+        typeToAdd = 'gallery';
+      } else if (hasWord(['اتصال', 'حجز', 'نموذج'])) {
+        typeToAdd = 'contact';
+      } else if (hasWord(['تذييل', 'اخير', 'روابط'])) {
+        typeToAdd = 'footer';
+      }
+
+      if (typeToAdd) {
+        addSectionTemplate(typeToAdd);
+        return trans.copilotSuccessSectionAdd;
+      }
+    }
+
+    // 6. Edit Hero Title
+    if (hasWord(['عنوان الهيرو', 'عنوان البطل', 'عنوان الواجه', 'العنوان الرئيسي', 'عنوان الموقع', 'عنوان']) && !hasWord(['فرعي'])) {
+      let newTitle = '';
+      if (isAR) {
+        const matches = text.match(/(?:إلى|الى|هو)\s+(.+)$/i);
+        if (matches) newTitle = matches[1].trim();
+      } else {
+        const matches = text.match(/(?:to|is)\s+(.+)$/i);
+        if (matches) newTitle = matches[1].trim();
+      }
+
+      if (newTitle) {
+        const heroSec = project.sections.find(s => s.type === 'hero');
+        if (heroSec) {
+          heroSec.content.title = newTitle;
+          saveProjectState();
+          renderCanvasPreview();
+          return trans.copilotSuccessHeroEdit;
+        }
+      }
+    }
+
+    // 7. Edit Hero Subtitle
+    if (hasWord(['عنوان فرعي', 'العنوان الفرعي', 'شرح البطل', 'الوصف الفرعي', 'وصف فرعي'])) {
+      let newSubtitle = '';
+      if (isAR) {
+        const matches = text.match(/(?:إلى|الى|هو)\s+(.+)$/i);
+        if (matches) newSubtitle = matches[1].trim();
+      } else {
+        const matches = text.match(/(?:to|is)\s+(.+)$/i);
+        if (matches) newSubtitle = matches[1].trim();
+      }
+
+      if (newSubtitle) {
+        const heroSec = project.sections.find(s => s.type === 'hero');
+        if (heroSec) {
+          heroSec.content.subtitle = newSubtitle;
+          saveProjectState();
+          renderCanvasPreview();
+          return trans.copilotSuccessHeroEdit;
+        }
+      }
+    }
+
+    return trans.copilotUnknown;
   }
 
   // Add Default Section Item Schema
@@ -647,6 +1031,128 @@ export function renderVisualEditor(appState, project, onBackToDashboard) {
       panel.style.display = 'none';
       renderCanvasPreview();
     });
+  }
+
+  // --- AI Copilot Async Integration (Ollama / Hugging Face) ---
+  async function processCopilotCommandAsync(text) {
+    const provider = localStorage.getItem('copilot_provider') || 'offline';
+    
+    if (provider === 'offline') {
+      return processCopilotCommand(text);
+    }
+
+    const systemPrompt = `You are a professional website builder AI. You receive the current website project JSON and a user editing instruction. Your task is to modify the project JSON according to the instruction.
+    
+    Here is the project JSON schema:
+    - name: string (the website title/name)
+    - description: string
+    - theme: 'theme-sunset' | 'theme-emerald' | 'theme-midnight' | 'theme-corporate'
+    - font: 'font-arabic' | 'font-english'
+    - sections: array of section objects. Each section has:
+      - id: string (unique identifier)
+      - type: 'hero' | 'features' | 'gallery' | 'contact' | 'footer'
+      - content: object depending on type.
+        - hero: { title, subtitle, ctaText, ctaLink }
+        - features: { title, subtitle, items: [{ icon, title, desc }] }
+        - gallery: { title, subtitle, items: [{ url, caption }] }
+        - contact: { title, subtitle, fields: array of ('name'|'phone'|'email'|'date'|'notes') }
+        - footer: { text, links }
+
+    You MUST respond ONLY with the updated project JSON object. Do not wrap it in markdown codeblocks (like \`\`\`json) or add any conversational text. Return only valid raw JSON.`;
+
+    const userPrompt = `Current Project JSON:\n${JSON.stringify(project)}\n\nUser Instruction:\n${text}`;
+
+    if (provider === 'ollama') {
+      const host = localStorage.getItem('copilot_ollama_host') || 'http://localhost:11434';
+      const model = localStorage.getItem('copilot_ollama_model') || 'llama3';
+
+      const res = await fetch('/api/copilot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'ollama',
+          host: host,
+          model: model,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+          ]
+        })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Ollama returned status ${res.status}`);
+      }
+      const data = await res.json();
+      const content = data.message?.content || data.response || '';
+      return applyUpdatedProjectJSON(content);
+    }
+
+    if (provider === 'huggingface') {
+      const token = localStorage.getItem('copilot_hf_token') || '';
+      const model = localStorage.getItem('copilot_hf_model') || 'meta-llama/Meta-Llama-3-8B-Instruct';
+
+      const hfPrompt = `<|system|>\n${systemPrompt}\n<|user|>\n${userPrompt}\n<|assistant|>\n`;
+
+      const res = await fetch('/api/copilot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'huggingface',
+          model: model,
+          token: token,
+          hfPrompt: hfPrompt
+        })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Hugging Face returned status ${res.status}`);
+      }
+
+      const data = await res.json();
+      const generatedText = Array.isArray(data) ? data[0].generated_text : data.generated_text || '';
+      return applyUpdatedProjectJSON(generatedText);
+    }
+  }
+
+  function applyUpdatedProjectJSON(responseText) {
+    try {
+      const cleanJson = extractJSON(responseText);
+      const updated = JSON.parse(cleanJson);
+
+      if (!updated.sections || !Array.isArray(updated.sections)) {
+        throw new Error("Invalid project structure returned by AI model.");
+      }
+
+      project.name = updated.name || project.name;
+      project.description = updated.description || project.description;
+      project.theme = updated.theme || project.theme;
+      project.font = updated.font || project.font;
+      project.sections = updated.sections;
+
+      const titleEl = document.getElementById('editor-project-title');
+      if (titleEl) titleEl.innerText = project.name;
+      saveProjectState();
+      renderCanvasPreview();
+
+      return appState.lang === 'ar' 
+        ? "✨ تم تطبيق تعديلات الذكاء الاصطناعي بنجاح وتحديث التصميم!" 
+        : "✨ AI modifications successfully applied and design updated!";
+    } catch (e) {
+      console.error("Failed to parse LLM response as JSON:", responseText, e);
+      throw new Error(`Failed to apply AI changes: ${e.message}`);
+    }
+  }
+
+  function extractJSON(text) {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start !== -1 && end !== -1 && end > start) {
+      return text.substring(start, end + 1);
+    }
+    throw new Error("No JSON object found in response");
   }
 
   return html;

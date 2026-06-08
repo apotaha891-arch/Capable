@@ -13,6 +13,7 @@ export default {
   create: "إنشاء",
   deploy: "نشر الموقع",
   preview: "معاينة",
+  previewNewWindow: "معاينة ↗️",
   back: "رجوع",
   status: "الحالة",
   public: "عام",
@@ -153,5 +154,19 @@ export default {
   
   // Notification alerts
   alertSiteSaved: "تم حفظ التعديلات بنجاح!",
-  alertClonedSuccess: "تم استنساخ المشروع بنجاح إلى حسابك ومتاح للتعديل الآن!"
+  alertClonedSuccess: "تم استنساخ المشروع بنجاح إلى حسابك ومتاح للتعديل الآن!",
+
+  // AI Copilot
+  editorTabCopilot: "مساعد الذكاء",
+  copilotGreeting: "مرحباً! أنا مساعدك الذكي. يمكنك كتابة أوامر لتعديل موقعك بالكامل، مثل:\n• 'غير الألوان إلى بنفسجي غامق'\n• 'أضف قسم المعرض'\n• 'تعديل عنوان الهيرو إلى مكتب المحاماة والاستشارات'\n• 'احذف قسم التذييل'\nكيف يمكنني مساعدتك الآن؟",
+  copilotPlaceholder: "اكتب طلب التعديل هنا...",
+  copilotSend: "تطبيق التعديل ✨",
+  copilotTyping: "جاري تحليل طلبك وتطبيق التعديلات السحرية...",
+  copilotSuccessTheme: "✅ تم تحديث الهوية اللونية للموقع بنجاح!",
+  copilotSuccessFont: "✅ تم تحديث خطوط الموقع بنجاح!",
+  copilotSuccessRename: "✅ تم تغيير اسم الموقع بنجاح!",
+  copilotSuccessSectionAdd: "✅ تم إضافة القسم المطلوب إلى موقعك!",
+  copilotSuccessSectionDel: "✅ تم حذف القسم بنجاح!",
+  copilotSuccessHeroEdit: "✅ تم تحديث نصوص الواجهة الرئيسية (Hero) بنجاح!",
+  copilotUnknown: "🤔 لم أستطع فهم الطلب بالكامل. جرب قول شيء مثل 'غير الألوان إلى برتقالي دافئ' أو 'أضف قسم خدمات'."
 };

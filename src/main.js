@@ -234,7 +234,7 @@ function switchDashboardTab(tabName) {
       (id) => navigateTo('editor', id),
       (cloned) => switchDashboardTab('my-projects'),
       () => switchDashboardTab('my-projects'),
-      (id) => navigateTo('site', id)
+      (id) => window.open(`${window.location.origin}${window.location.pathname}#site/${id}`, '_blank')
     );
 
   } else if (tabName === 'community') {
@@ -262,7 +262,7 @@ function switchDashboardTab(tabName) {
       null,
       (cloned) => navigateTo('editor', cloned.id), // Go to editor on cloning public site!
       null,
-      (id) => navigateTo('site', id)
+      (id) => window.open(`${window.location.origin}${window.location.pathname}#site/${id}`, '_blank')
     );
 
   } else if (tabName === 'templates') {
@@ -479,3 +479,14 @@ function renderDeployedSite(project) {
 // Router Event Listeners
 window.addEventListener('hashchange', router);
 window.addEventListener('DOMContentLoaded', router);
+
+// Real-Time Cross-Tab Sync
+window.addEventListener('storage', (e) => {
+  if (e.key === 'cabable_projects' && appState.currentView === 'site-preview' && appState.activeProject) {
+    const updatedProj = storage.getProjectById(appState.activeProject.id);
+    if (updatedProj) {
+      appState.activeProject = updatedProj;
+      renderDeployedSite(updatedProj);
+    }
+  }
+});
