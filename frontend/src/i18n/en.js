@@ -118,6 +118,21 @@ const en = {
   feature3Title: 'Publish & share instantly',
   feature3Desc: 'Live link for every project, connect your own domain, and gather feedback from real users.',
 
+  // Landing — Ecosystem (Marketplace, Challenges, Influence)
+  ecoNav: 'Ecosystem',
+  ecoLabel: 'More than a builder',
+  ecoTitle: 'A whole ecosystem to grow with',
+  ecoSubtitle: "Capable isn't just where you build — it's where you earn, compete, and shape what comes next.",
+  ecoMarketTitle: 'Marketplace',
+  ecoMarketDesc: 'Adopt proven modules from other creators — copied straight into your project. Or list your own and earn 70% on every sale.',
+  ecoMarketCta: 'Browse the marketplace',
+  ecoChallengeTitle: 'Challenges',
+  ecoChallengeDesc: 'Join a challenge, hit the goal in time, and win tokens, credit, or cash. No risk — the platform funds the prizes.',
+  ecoChallengeCta: 'See active challenges',
+  ecoInfluenceTitle: 'Influence Pass',
+  ecoInfluenceDesc: 'Earn early access, personalization, and a real say in the roadmap. The more you build, the more your voice steers the platform.',
+  ecoInfluenceCta: 'Unlock influence',
+
   // Landing — Final CTA
   finalLabel: "Time to start",
   finalTitle: 'Your idea deserves a chance before dying in a spreadsheet.',

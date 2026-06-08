@@ -4,7 +4,7 @@ import {
   Sparkles, ArrowRight, Eye, Rocket, Target,
   AlertTriangle, CheckCircle2, X, Clock, TrendingDown,
   TrendingUp, MessageSquare, Code2, Wand2, Share2, Globe,
-  Check, Users,
+  Check, Users, Store, Trophy,
 } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
@@ -278,6 +278,9 @@ export default function LandingPage() {
             <Link to="/explore" className="hidden sm:inline text-capable-text dark:text-slate-300 hover:text-capable-navy dark:hover:text-white transition-colors px-2">
               {t('explore')}
             </Link>
+            <a href="#ecosystem" className="hidden md:inline text-capable-text dark:text-slate-300 hover:text-capable-navy dark:hover:text-white transition-colors px-2">
+              {t('ecoNav')}
+            </a>
             <Link to="/dashboard" className="hidden sm:inline text-capable-text dark:text-slate-300 hover:text-capable-navy dark:hover:text-white transition-colors px-2">
               {t('dashboard')}
             </Link>
@@ -610,6 +613,68 @@ export default function LandingPage() {
                   <h3 className="text-xl font-bold text-capable-navy dark:text-white mb-3">{f.title}</h3>
                   <p className="text-capable-muted dark:text-slate-400 leading-relaxed">{f.desc}</p>
                 </div>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ───────────── ECOSYSTEM ───────────── */}
+      <section id="ecosystem" className="relative z-10 scroll-mt-20 bg-capable-surface dark:bg-transparent border-b border-gray-100 dark:border-slate-800/60">
+        <div className="max-w-6xl mx-auto px-6 md:px-8 py-20 md:py-24">
+          <div className="max-w-3xl mb-12">
+            <Reveal>
+              <SectionLabel>
+                <Sparkles size={12} /> {t('ecoLabel')}
+              </SectionLabel>
+            </Reveal>
+            <Reveal delay={80}><h2 className="mt-4 mb-3">{t('ecoTitle')}</h2></Reveal>
+            <Reveal delay={140}>
+              <p className="text-capable-muted dark:text-slate-400 text-base md:text-lg leading-relaxed">{t('ecoSubtitle')}</p>
+            </Reveal>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {[
+              {
+                to: '/marketplace',
+                icon: <Store size={20} />,
+                accent: 'bg-cyan-500/10 text-cyan-600 dark:bg-cyan-500/15 dark:text-cyan-300',
+                title: t('ecoMarketTitle'),
+                desc: t('ecoMarketDesc'),
+                cta: t('ecoMarketCta'),
+              },
+              {
+                to: '/challenges',
+                icon: <Trophy size={20} />,
+                accent: 'bg-amber-500/10 text-amber-600 dark:bg-amber-500/15 dark:text-amber-300',
+                title: t('ecoChallengeTitle'),
+                desc: t('ecoChallengeDesc'),
+                cta: t('ecoChallengeCta'),
+              },
+              {
+                to: '/influence',
+                icon: <Sparkles size={20} />,
+                accent: 'bg-capable-navy/10 text-capable-navy dark:bg-indigo-500/15 dark:text-indigo-300',
+                title: t('ecoInfluenceTitle'),
+                desc: t('ecoInfluenceDesc'),
+                cta: t('ecoInfluenceCta'),
+              },
+            ].map((card, i) => (
+              <Reveal key={card.to} delay={i * 100}>
+                <Link
+                  to={card.to}
+                  className="group block brand-card p-7 h-full flex flex-col hover:border-capable-light dark:hover:border-indigo-500/50 hover:shadow-brand transition-all"
+                >
+                  <div className={`w-10 h-10 rounded-brand flex items-center justify-center mb-5 ${card.accent}`}>
+                    {card.icon}
+                  </div>
+                  <h3 className="text-xl font-bold text-capable-navy dark:text-white mb-3">{card.title}</h3>
+                  <p className="text-capable-muted dark:text-slate-400 text-sm md:text-base leading-relaxed mb-5 flex-1">{card.desc}</p>
+                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-capable-navy dark:text-indigo-300 group-hover:gap-2.5 transition-all">
+                    {card.cta} {ArrowIcon}
+                  </span>
+                </Link>
               </Reveal>
             ))}
           </div>

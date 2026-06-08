@@ -118,6 +118,21 @@ const ar = {
   feature3Title: 'انشر وشارك فوراً',
   feature3Desc: 'رابط مباشر لكل مشروع، اربط نطاقك الخاص، واجمع آراء عملائك الحقيقيين.',
 
+  // Landing — Ecosystem (Marketplace, Challenges, Influence)
+  ecoNav: 'المنظومة',
+  ecoLabel: 'أكثر من أداة بناء',
+  ecoTitle: 'منظومة كاملة تنمو معك',
+  ecoSubtitle: 'كيبابل ليس مجرّد مكان تبني فيه — بل حيث تكسب وتتنافس وتشكّل ما هو قادم.',
+  ecoMarketTitle: 'المتجر',
+  ecoMarketDesc: 'تبنَّ وحدات مُجرّبة من منشئين آخرين — تُنسخ مباشرة إلى مشروعك. أو انشر وحدتك واكسب 70٪ من كل عملية بيع.',
+  ecoMarketCta: 'تصفّح المتجر',
+  ecoChallengeTitle: 'التحديات',
+  ecoChallengeDesc: 'انضمّ إلى تحدٍّ، حقّق الهدف في الوقت، واربح توكنات أو رصيداً أو نقداً. لا مخاطرة — المنصة تموّل الجوائز.',
+  ecoChallengeCta: 'شاهد التحديات النشطة',
+  ecoInfluenceTitle: 'باقة التأثير',
+  ecoInfluenceDesc: 'احصل على وصول مبكر وتخصيص وصوت حقيقي في خارطة الطريق. كلما بنيت أكثر، زاد تأثير صوتك في توجيه المنصة.',
+  ecoInfluenceCta: 'افتح التأثير',
+
   // Landing — Final CTA
   finalLabel: 'حان وقت البدء',
   finalTitle: 'فكرتك تستحق فرصة قبل أن تموت في ملف إكسل.',
