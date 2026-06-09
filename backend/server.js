@@ -2173,6 +2173,10 @@ app.get('/api/blueprint/health', (req, res) => {
     // actually sees the Stripe env vars after a Railway redeploy.
     stripe_configured: !!stripe,
     stripe_webhook_configured: !!process.env.STRIPE_WEBHOOK_SECRET,
+    // The deployed commit (Railway injects this) so we can confirm which code is
+    // actually live, plus which open-weight generator is active.
+    commit: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || 'unknown',
+    oss_generator: OSS_API_KEY ? OSS_MODEL : 'gemini-fallback',
   });
 });
 
