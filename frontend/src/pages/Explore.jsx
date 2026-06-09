@@ -35,7 +35,7 @@ export default function Explore() {
     nameAr: p.name_ar || (/[؀-ۿ]/.test(p.name || '') ? p.name : ''),
     description: p.description || t('showcaseTemplateDesc'),
     author: p.author,
-    image: p.thumbnail_url,
+    image: /\/\/localhost|:5000\//.test(p.thumbnail_url || '') ? null : p.thumbnail_url,
     price: p.price || 0,
     likes: p.likes || 0,
     views: p.views || 0,

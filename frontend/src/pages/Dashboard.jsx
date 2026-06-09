@@ -336,8 +336,14 @@ function QuotaBar({ label, used, limit, lang }) {
   );
 }
 
+// A thumbnail URL is unusable if it was captured with a localhost BASE_URL (old
+// rows) — treat those as missing so the placeholder shows instead of a broken
+// image. onError below also catches files that 404 (e.g. lost on a volume reset).
+const isBrokenThumb = (url) => !url || /\/\/localhost|:5000\//.test(url);
+
 function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
-  const hasThumb = !!project.thumbnail_url;
+  const [imgError, setImgError] = useState(false);
+  const hasThumb = !isBrokenThumb(project.thumbnail_url) && !imgError;
   const editPath = project.has_blueprint ? `/blueprint/${project.id}` : `/editor/${project.id}`;
   const liveUrl = project.has_blueprint
     ? siteUrl(project.published_slug)
@@ -357,7 +363,7 @@ function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
       {/* Thumbnail */}
       <Link to={editPath} className="block relative aspect-video bg-slate-950 overflow-hidden border-b border-slate-800">
         {hasThumb ? (
-          <img src={project.thumbnail_url} alt={project.name} className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform" />
+          <img src={project.thumbnail_url} alt={project.name} onError={() => setImgError(true)} className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform" />
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-indigo-900/40 to-slate-900 flex items-center justify-center relative">
             <div className="absolute inset-0 opacity-5" style={{ backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 20px,#6366f1 20px,#6366f1 21px),repeating-linear-gradient(90deg,transparent,transparent 20px,#6366f1 20px,#6366f1 21px)' }} />
