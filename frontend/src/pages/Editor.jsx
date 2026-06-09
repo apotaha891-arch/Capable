@@ -5,6 +5,7 @@ import html2canvas from 'html2canvas';
 import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
+import Logo from '../components/Logo.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 // Model tiers (same engine as the Builder). Higher tiers cost more but review harder.
@@ -502,10 +503,7 @@ export default function Editor() {
     <div className="h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 flex flex-col overflow-hidden">
       {/* ── Navbar ── */}
       <nav className="flex items-center gap-2 px-3 sm:px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur shrink-0 shadow-sm dark:shadow-none z-20">
-        <Link to="/" className="flex items-center gap-2 shrink-0" title="Capable">
-          <div className="bg-capable-navy dark:bg-gradient-to-br dark:from-indigo-500 dark:to-cyan-400 p-1.5 rounded-lg text-white"><Sparkles size={16} /></div>
-          <span className="font-bold text-lg text-capable-navy dark:bg-gradient-to-r dark:from-indigo-400 dark:to-cyan-400 dark:bg-clip-text dark:text-transparent hidden sm:block">Capable</span>
-        </Link>
+        <Logo to="/" size="sm" wordClassName="hidden sm:block" />
 
         <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 mx-1 hidden sm:block" />
 

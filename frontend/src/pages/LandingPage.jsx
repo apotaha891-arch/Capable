@@ -9,7 +9,7 @@ import {
 import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
-import CapableLogo from '../components/CapableLogo.jsx';
+import Logo from '../components/Logo.jsx';
 import { API_BASE as API } from '../utils/api.js';
 
 // Users who ask for reduced motion get content revealed immediately, no animation.
@@ -264,14 +264,7 @@ export default function LandingPage() {
       {/* ───────────── NAVBAR ───────────── */}
       <nav className="sticky top-0 z-50 bg-white/95 dark:bg-slate-950/80 backdrop-blur border-b border-gray-200 dark:border-slate-800/70">
         <div className="max-w-6xl mx-auto px-6 md:px-8 py-4 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2.5">
-            <div className="bg-capable-navy dark:bg-gradient-to-br dark:from-indigo-500 dark:to-cyan-400 p-2 rounded-brand text-white">
-              <CapableLogo size={20} strokeWidth={6.5} />
-            </div>
-            <span className="font-bold text-xl tracking-tight text-capable-navy dark:bg-gradient-to-r dark:from-indigo-300 dark:to-cyan-300 dark:bg-clip-text dark:text-transparent">
-              {t('appName')}
-            </span>
-          </Link>
+          <Logo to="/" className="gap-2.5" />
           <div className="flex items-center gap-2 md:gap-3 text-sm font-medium">
             <ThemeToggle />
             <LangToggle />
@@ -722,12 +715,7 @@ export default function LandingPage() {
       {/* ───────────── FOOTER ───────────── */}
       <footer className="relative z-10 bg-white dark:bg-transparent border-t border-gray-200 dark:border-slate-800/60">
         <div className="max-w-6xl mx-auto px-6 md:px-8 py-8 flex items-center justify-between flex-wrap gap-4">
-          <div className="flex items-center gap-2">
-            <div className="bg-capable-navy dark:bg-gradient-to-br dark:from-indigo-500 dark:to-cyan-400 p-1.5 rounded-brand text-white">
-              <CapableLogo size={14} strokeWidth={7} />
-            </div>
-            <span className="font-bold text-capable-navy dark:text-white">{t('appName')}</span>
-          </div>
+          <Logo to={null} size="sm" />
           <p className="text-sm text-capable-muted dark:text-slate-500">
             © {new Date().getFullYear()} {t('appName')}
           </p>

@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
-import CapableLogo from '../components/CapableLogo.jsx';
+import Logo from '../components/Logo.jsx';
 
 // ─── System Prompt ─────────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `You are Capable's AI builder — an expert web developer and designer embedded inside the Capable platform. Your ONLY job is to generate complete, beautiful, production-ready websites and web apps based on user descriptions.
@@ -444,14 +444,7 @@ export default function BuilderPage() {
       >
         {/* Nav */}
         <nav className="flex items-center justify-between px-6 py-4 border-b border-slate-800/60">
-          <Link to="/dashboard" className="flex items-center gap-2.5 group">
-            <div className="bg-indigo-600 p-1.5 rounded-lg text-white group-hover:bg-indigo-500 transition-colors">
-              <CapableLogo size={18} strokeWidth={6.5} />
-            </div>
-            <span className="font-bold text-lg bg-gradient-to-r from-indigo-300 to-cyan-300 bg-clip-text text-transparent">
-              Capable
-            </span>
-          </Link>
+          <Logo to="/dashboard" appearance="dark" />
           <Link
             to="/dashboard"
             className="text-sm text-slate-400 hover:text-white transition-colors flex items-center gap-1.5"
@@ -551,14 +544,7 @@ export default function BuilderPage() {
       <header className="flex items-center justify-between px-4 py-2.5 border-b border-slate-800 bg-slate-900/80 backdrop-blur shrink-0 gap-3">
         {/* Left: logo + title */}
         <div className="flex items-center gap-3 min-w-0">
-          <Link to="/dashboard" className="flex items-center gap-2 shrink-0">
-            <div className="bg-indigo-600 p-1.5 rounded-lg text-white">
-              <CapableLogo size={16} strokeWidth={6.5} />
-            </div>
-            <span className="font-bold text-sm bg-gradient-to-r from-indigo-300 to-cyan-300 bg-clip-text text-transparent hidden sm:block">
-              Capable
-            </span>
-          </Link>
+          <Logo to="/dashboard" size="sm" appearance="dark" wordClassName="hidden sm:block" />
           {projectTitle && (
             <>
               <ChevronRight size={14} className="text-slate-600 shrink-0" />

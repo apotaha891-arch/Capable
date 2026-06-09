@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Sparkles, Globe } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
+import Logo from '../components/Logo.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import NewProjectModal from '../components/NewProjectModal.jsx';
 import GalleryCard from '../components/GalleryCard.jsx';
@@ -95,12 +96,7 @@ export default function Explore() {
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
       {/* Navbar */}
       <nav className="flex items-center justify-between px-8 py-4 border-b border-slate-800 bg-slate-900 sticky top-0 z-30">
-        <Link to="/" className="flex items-center gap-2">
-          <div className="bg-indigo-600 p-2 rounded-lg text-white"><Sparkles size={20} /></div>
-          <span className="font-bold text-xl tracking-wide bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
-            {t('appName')}
-          </span>
-        </Link>
+        <Logo to="/" appearance="dark" />
         <div className="flex items-center gap-3 text-sm font-medium">
           <LangToggle />
           <Link to="/dashboard" className="text-slate-300 hover:text-white transition-colors">{t('dashboard')}</Link>

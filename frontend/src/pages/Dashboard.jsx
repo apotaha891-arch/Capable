@@ -7,7 +7,7 @@ import LangToggle from '../components/LangToggle.jsx';
 import NotificationBell from '../components/NotificationBell.jsx';
 import { siteUrl, whatsappShareUrl, shareSite } from '../utils/site.js';
 import { hostedUrl } from '../utils/api.js';
-import CapableLogo from '../components/CapableLogo.jsx';
+import Logo from '../components/Logo.jsx';
 
 const PLAN_COLORS = { free: 'text-slate-400', pro: 'text-indigo-400', enterprise: 'text-amber-400' };
 const PLAN_LABELS = { free: 'Free', pro: 'Pro', enterprise: 'Enterprise' };
@@ -139,10 +139,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
       {/* Top bar */}
       <nav className="flex items-center justify-between px-6 py-3 border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-30">
-        <Link to="/" className="flex items-center gap-2">
-          <div className="bg-indigo-600 p-1.5 rounded-lg text-white"><Sparkles size={18} /></div>
-          <span className="font-bold text-lg bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">{t('appName')}</span>
-        </Link>
+        <Logo to="/" size="sm" appearance="dark" />
         <div className="flex items-center gap-3 text-sm">
           <NotificationBell />
           <LangToggle />

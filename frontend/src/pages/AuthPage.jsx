@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Sparkles, Mail, Lock, User, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useLang } from '../i18n/LangContext.jsx';
+import Logo from '../components/Logo.jsx';
 
 export default function AuthPage() {
   const [mode, setMode] = useState('login'); // 'login' | 'register'
@@ -51,14 +52,9 @@ export default function AuthPage() {
 
       <div className="w-full max-w-md relative">
         {/* Logo */}
-        <Link to="/" className="flex items-center gap-2 justify-center mb-8">
-          <div className="bg-indigo-600 p-2.5 rounded-xl text-white shadow-lg shadow-indigo-500/30">
-            <Sparkles size={22} />
-          </div>
-          <span className="font-bold text-2xl bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
-            {t('appName')}
-          </span>
-        </Link>
+        <div className="flex justify-center mb-8">
+          <Logo to="/" size="lg" appearance="dark" />
+        </div>
 
         {/* Card */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
