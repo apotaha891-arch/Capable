@@ -101,18 +101,32 @@ function PricingSection({ t, isRTL }) {
     'Unlimited text & color edits',
   ];
 
+  const influenceFeatures = isRTL ? [
+    'أرصدة تصميم ذكي أكثر بكثير',
+    'نطاق مخصص واحد مشمول',
+    'وصول مبكر للميزات الجديدة',
+    'صوت وتأثير في خارطة الطريق',
+    'كل ميزات الخطة المجانية',
+  ] : [
+    'Much more AI Design Credits',
+    'One custom domain included',
+    'Early access to new features',
+    'A real say in the roadmap',
+    'Everything in Free',
+  ];
+
   const proFeatures = isRTL ? [
     'أرصدة تصميم ذكي بكميات أكبر',
     'نشر بنقرة واحدة + SSL مجاني',
-    'دومين مخصص مع إعداد سحري',
-    'أولوية في دعم العملاء',
-    'كل ميزات الخطة المجانية',
+    'نطاقات مخصصة بلا حدود وبلا علامة',
+    'أولوية في المعالجة والدعم',
+    'كل ميزات باقة التأثير',
   ] : [
-    '10× more AI Design Credits',
+    '4× more AI Design Credits',
     'One-click publishing + free SSL',
-    'Custom domain with guided setup',
-    'Priority customer support',
-    'Everything in Free',
+    'Unlimited unbranded custom domains',
+    'Priority processing & support',
+    'Everything in Influence',
   ];
 
   const consultFeatures = isRTL ? [
@@ -162,7 +176,7 @@ function PricingSection({ t, isRTL }) {
             </div>
           </Reveal>
 
-          {/* Pro — highlighted */}
+          {/* Influence — highlighted */}
           <Reveal delay={100}>
             <div className="relative rounded-brand p-8 h-full flex flex-col bg-capable-navy dark:bg-gradient-to-b dark:from-indigo-900/60 dark:to-slate-900 text-white shadow-brand-lg dark:shadow-2xl dark:shadow-indigo-500/20 dark:border dark:border-indigo-500/50">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2">
@@ -171,52 +185,70 @@ function PricingSection({ t, isRTL }) {
                 </span>
               </div>
               <div className="mb-6">
-                <div className="text-sm font-semibold text-white/70 dark:text-indigo-300 uppercase tracking-wider mb-2">{t('planProTitle')}</div>
+                <div className="text-sm font-semibold text-white/70 dark:text-indigo-300 uppercase tracking-wider mb-2">{t('planInfluenceTitle')}</div>
                 <div className="flex items-end gap-1 mb-1">
-                  <span className="text-4xl font-extrabold text-white">{t('planProPrice')}</span>
-                  <span className="text-white/70 text-sm mb-1">{t('planProPer')}</span>
+                  <span className="text-4xl font-extrabold text-white">{t('planInfluencePrice')}</span>
+                  <span className="text-white/70 text-sm mb-1">{t('planInfluencePer')}</span>
                 </div>
-                <p className="text-sm text-white/70">{t('planProDesc')}</p>
+                <p className="text-sm text-white/70">{t('planInfluenceDesc')}</p>
               </div>
               <ul className="space-y-3 mb-8 flex-1">
-                {proFeatures.map((f, i) => (
+                {influenceFeatures.map((f, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-white/90">
                     <Check size={15} className="text-capable-success mt-0.5 shrink-0" />
                     {f}
                   </li>
                 ))}
               </ul>
-              <Link to="/dashboard" className="w-full bg-white text-capable-navy dark:bg-indigo-600 dark:text-white hover:bg-capable-surface dark:hover:bg-indigo-500 py-3 rounded-brand text-sm font-bold text-center transition-all">
-                {t('planProBadge')}
+              <Link to="/influence" className="w-full bg-white text-capable-navy dark:bg-indigo-600 dark:text-white hover:bg-capable-surface dark:hover:bg-indigo-500 py-3 rounded-brand text-sm font-bold text-center transition-all">
+                {t('planInfluenceBadge')}
               </Link>
             </div>
           </Reveal>
 
-          {/* Expert / Consulting */}
+          {/* Pro */}
           <Reveal delay={200}>
             <div className="brand-card p-8 h-full flex flex-col">
               <div className="mb-6">
-                <div className="w-10 h-10 rounded-brand bg-capable-navy/10 dark:bg-purple-500/20 text-capable-navy dark:text-purple-300 flex items-center justify-center mb-4">
-                  <Users size={20} />
+                <div className="text-sm font-semibold text-capable-muted dark:text-slate-400 uppercase tracking-wider mb-2">{t('planProTitle')}</div>
+                <div className="flex items-end gap-1 mb-1">
+                  <span className="text-4xl font-extrabold text-capable-navy dark:text-white">{t('planProPrice')}</span>
+                  <span className="text-capable-muted dark:text-slate-500 text-sm mb-1">{t('planProPer')}</span>
                 </div>
-                <div className="text-sm font-semibold text-capable-muted dark:text-purple-300 uppercase tracking-wider mb-2">{t('planConsultTitle')}</div>
-                <div className="text-2xl font-extrabold text-capable-navy dark:text-white mb-1">{t('planConsultPrice')}</div>
-                <p className="text-sm text-capable-muted dark:text-slate-400">{t('planConsultDesc')}</p>
+                <p className="text-sm text-capable-muted dark:text-slate-500">{t('planProDesc')}</p>
               </div>
               <ul className="space-y-3 mb-8 flex-1">
-                {consultFeatures.map((f, i) => (
+                {proFeatures.map((f, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-capable-text dark:text-slate-300">
-                    <Check size={15} className="text-capable-navy dark:text-purple-400 mt-0.5 shrink-0" />
+                    <Check size={15} className="text-capable-success mt-0.5 shrink-0" />
                     {f}
                   </li>
                 ))}
               </ul>
-              <a href="mailto:hello@capable.app?subject=Expert%20Help%20Request" className="w-full bg-capable-navy/90 dark:bg-purple-700 hover:bg-capable-navy dark:hover:bg-purple-600 text-white py-3 rounded-brand text-sm font-semibold text-center transition-colors">
-                {t('planConsultBadge')}
-              </a>
+              <Link to="/influence" className="w-full bg-capable-navy dark:bg-slate-800 hover:bg-capable-medium dark:hover:bg-slate-700 text-white py-3 rounded-brand text-sm font-bold text-center transition-colors">
+                {t('planProBadge')}
+              </Link>
             </div>
           </Reveal>
         </div>
+
+        {/* Expert / Consulting — band */}
+        <Reveal delay={120}>
+          <div className="mt-6 brand-card p-6 flex flex-col sm:flex-row sm:items-center gap-4 justify-between">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-brand bg-capable-navy/10 dark:bg-purple-500/20 text-capable-navy dark:text-purple-300 flex items-center justify-center shrink-0">
+                <Users size={20} />
+              </div>
+              <div>
+                <div className="text-sm font-bold text-capable-navy dark:text-white">{t('planConsultTitle')} · {t('planConsultPrice')}</div>
+                <p className="text-sm text-capable-muted dark:text-slate-400">{t('planConsultDesc')}</p>
+              </div>
+            </div>
+            <a href="mailto:hello@capable.app?subject=Expert%20Help%20Request" className="shrink-0 bg-capable-navy/90 dark:bg-purple-700 hover:bg-capable-navy dark:hover:bg-purple-600 text-white py-2.5 px-5 rounded-brand text-sm font-semibold text-center transition-colors">
+              {t('planConsultBadge')}
+            </a>
+          </div>
+        </Reveal>
       </div>
     </section>
   );
