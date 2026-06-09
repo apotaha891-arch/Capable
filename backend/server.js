@@ -2251,6 +2251,18 @@ app.post('/api/generate', authMiddleware, async (req, res) => {
         [project_id, req.user.id]
       );
       existingFiles = rows;
+      // Fall back to the project's single-file `code` column when there are no
+      // project_files rows. Cloned and older projects keep the whole site in
+      // `code`, not as files — without this the editor sees no existing site and
+      // rebuilds from scratch instead of applying the requested edit.
+      if (existingFiles.length === 0) {
+        const { rows: pc } = await pool.query(
+          'SELECT code FROM projects WHERE id = $1 AND user_id = $2', [project_id, req.user.id]
+        );
+        if (pc[0]?.code && pc[0].code.trim()) {
+          existingFiles = [{ filename: 'index.html', content: pc[0].code }];
+        }
+      }
       if (existingFiles.length) {
         editContext = [{
           prompt: 'This is the current project I am editing. Apply the change in my next message to THIS project, then return ONLY the files you actually change or add (each with full content) as {"files":[...]}. Do NOT return files you did not touch. Preserve everything else exactly; do not create a new site or change the business/content unless explicitly asked.',
