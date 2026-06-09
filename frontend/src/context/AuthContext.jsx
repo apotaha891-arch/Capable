@@ -50,11 +50,22 @@ export function AuthProvider({ children }) {
     setUser(null);
   };
 
-  // Authenticated fetch helper
-  const authFetch = (url, options = {}) => fetch(`${API}${url}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...options.headers },
-  });
+  // Authenticated fetch helper. On a 401 from an authed call, the session token
+  // is invalid/expired (e.g. JWT_SECRET was rotated on the server), so clear it —
+  // ProtectedRoute then redirects to sign-in instead of every request silently
+  // failing with a stale token.
+  const authFetch = async (url, options = {}) => {
+    const res = await fetch(`${API}${url}`, {
+      ...options,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...options.headers },
+    });
+    if (res.status === 401 && token) {
+      localStorage.removeItem('capable_token');
+      setToken(null);
+      setUser(null);
+    }
+    return res;
+  };
 
   return (
     <AuthContext.Provider value={{ user, token, loading, login, register, logout, authFetch }}>
