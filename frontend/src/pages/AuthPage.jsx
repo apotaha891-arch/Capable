@@ -16,7 +16,12 @@ export default function AuthPage() {
   const { t, lang } = useLang();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = location.state?.from?.pathname || '/dashboard';
+  // Preserve the full target (path + query + hash), not just the pathname, so a
+  // gated link like /builder?from=34 survives the sign-in round-trip.
+  const fromLoc = location.state?.from;
+  const from = fromLoc
+    ? `${fromLoc.pathname || ''}${fromLoc.search || ''}${fromLoc.hash || ''}`
+    : '/dashboard';
 
   const handleSubmit = async (e) => {
     e.preventDefault();

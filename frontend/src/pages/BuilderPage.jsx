@@ -184,14 +184,43 @@ export default function BuilderPage() {
   const [tier, setTier]                   = useState('capable1'); // capable1 | capable2 | capable3
   const [upsell, setUpsell]               = useState(null);  // reason code for the engine whisper
 
+  // Remix flow: arriving from a public preview's "Edit with Capable" badge
+  // (/builder?from=<id>) clones that public project into the user's account and
+  // opens the copy in the editor. Seed `remixing` from the URL so the very first
+  // render shows the loading screen instead of a flash of the blank builder.
+  const [remixing, setRemixing]           = useState(() => new URLSearchParams(window.location.search).has('from'));
+  const [remixError, setRemixError]       = useState(false);
+
   const textareaRef  = useRef(null);
   const chatEndRef   = useRef(null);
   const iframeRef    = useRef(null);
+  const remixStartedRef = useRef(false);
 
   // Scroll chat to bottom
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatLog]);
+
+  // Clone-and-open when the URL carries ?from=<id> (the preview badge). The
+  // /builder route is auth-gated, so `user` is guaranteed here; logged-out
+  // viewers sign in first and return with the param intact. The ref guard stops
+  // a double clone under StrictMode's double-invoked effects.
+  useEffect(() => {
+    const sourceId = new URLSearchParams(window.location.search).get('from');
+    if (!sourceId || remixStartedRef.current) return;
+    remixStartedRef.current = true;
+    (async () => {
+      try {
+        const res = await authFetch(`/api/projects/${encodeURIComponent(sourceId)}/clone`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'clone failed');
+        navigate(data.has_blueprint ? `/blueprint/${data.id}` : `/editor/${data.id}`, { replace: true });
+      } catch {
+        setRemixing(false);
+        setRemixError(true);
+      }
+    })();
+  }, [authFetch, navigate]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -378,6 +407,33 @@ export default function BuilderPage() {
 
   const vp = VIEWPORTS.find(v => v.id === viewport);
   const previewDoc = useMemo(() => buildPreviewDoc(generatedCode), [generatedCode]);
+
+  // ── REMIX PHASE ───────────────────────────────────────────────────────────────
+  // Cloning a previewed project into the user's account, then redirecting to the
+  // editor. Shown instead of the blank builder while the clone is in flight.
+  if (remixing) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center gap-4" dir={isRTL ? 'rtl' : 'ltr'}>
+        <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+        <p className="text-slate-400 text-sm">{isRTL ? 'جارٍ تجهيز نسختك للتعديل…' : 'Preparing your copy to edit…'}</p>
+      </div>
+    );
+  }
+
+  if (remixError) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center gap-4 px-6 text-center" dir={isRTL ? 'rtl' : 'ltr'}>
+        <AlertCircle className="text-amber-400" size={28} />
+        <p className="text-slate-300 max-w-sm">{isRTL ? 'تعذّر فتح هذا المشروع للتعديل. يمكنك البدء بمشروع جديد بدلاً من ذلك.' : "Couldn't open that project to edit. You can start a new one instead."}</p>
+        <button
+          onClick={() => setRemixError(false)}
+          className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-sm font-medium transition-colors"
+        >
+          {isRTL ? 'ابدأ مشروعاً جديداً' : 'Start a new project'}
+        </button>
+      </div>
+    );
+  }
 
   // ── INPUT PHASE ───────────────────────────────────────────────────────────────
   if (phase === 'input') {
