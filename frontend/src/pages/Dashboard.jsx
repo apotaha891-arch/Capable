@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Sparkles, Plus, Trash2, FolderOpen, Globe, GlobeLock, Share2, Zap, LogOut, Settings, ArrowUpRight, Compass, Wand2, MessageCircle, Link2, Check, Users, ChevronRight, Shield, Gauge, Tag, Target } from 'lucide-react';
+import { Sparkles, Plus, Trash2, FolderOpen, Globe, GlobeLock, Share2, Zap, LogOut, Settings, ArrowUpRight, Compass, Wand2, MessageCircle, Link2, Check, Users, ChevronRight, Shield, Gauge, Tag, Target, HelpCircle } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
@@ -233,6 +233,9 @@ export default function Dashboard() {
             </Link>
             <Link to="/marketplace" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
               <Tag size={14} /> {lang === 'ar' ? 'السوق' : 'Marketplace'}
+            </Link>
+            <Link to="/docs" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
+              <HelpCircle size={14} /> {lang === 'ar' ? 'التوثيق' : 'Docs'}
             </Link>
             <button className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
               <Settings size={14} /> {lang === 'ar' ? 'الإعدادات' : 'Settings'}
