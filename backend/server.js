@@ -411,6 +411,21 @@ async function initDB() {
       );
     }
 
+    // Backfill Arabic content on the seeded demo assets so the Arabic-first
+    // marketplace shows translated titles/descriptions. Idempotent (merges into
+    // metadata for known slugs), so it also updates rows seeded before this code.
+    const arAssets = [
+      ['launch-ritual', 'حزمة طقوس الإطلاق', 'تدفّق إطلاق مُجرّب خطوة بخطوة لتحويل القالب إلى موقع جاهز لتحقيق الإيرادات.'],
+      ['partner-playbook', 'دليل نمو الشركاء', 'سير عمل قابل لإعادة الاستخدام لإعداد الشركاء وقائمة ترويج لتوسيع أثر شبكتك.'],
+      ['commitment-canvas', 'لوحة الالتزام', 'قالب منظّم لوضع الأهداف يحوّل السلوك إلى نتائج عمل متوقّعة.'],
+    ];
+    for (const [slug, title_ar, description_ar] of arAssets) {
+      await pool.query(
+        `UPDATE licensed_assets SET metadata = COALESCE(metadata, '{}'::jsonb) || $2::jsonb WHERE slug = $1`,
+        [slug, JSON.stringify({ title_ar, description_ar })]
+      );
+    }
+
     console.log('✅ Database schema initialized');
   } catch (err) {
     console.error('❌ Database schema initialization failed', err);

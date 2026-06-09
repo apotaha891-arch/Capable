@@ -137,7 +137,12 @@ export default function MarketplacePage() {
           )}
 
           <div className="mt-8 grid gap-5 lg:grid-cols-3">
-            {assets.map((asset) => (
+            {assets.map((asset) => {
+              // Prefer Arabic title/description from metadata when the UI is in
+              // Arabic; fall back to the stored (creator-language) content.
+              const title = (ar && asset.metadata?.title_ar) || asset.title;
+              const description = (ar && asset.metadata?.description_ar) || asset.description;
+              return (
               <div key={asset.id} className="rounded-3xl border border-slate-800 bg-slate-950 p-6 flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between gap-2">
@@ -150,13 +155,13 @@ export default function MarketplacePage() {
                       </span>
                     )}
                   </div>
-                  <h2 className="mt-4 text-xl font-semibold text-white">{asset.title}</h2>
+                  <h2 className="mt-4 text-xl font-semibold text-white">{title}</h2>
                   {asset.creator_name && (
                     <div className="mt-1 flex items-center gap-1 text-xs text-slate-500">
                       <User size={11} /> {ar ? 'بواسطة' : 'by'} {asset.creator_name}
                     </div>
                   )}
-                  <p className="mt-3 text-slate-400 text-sm leading-relaxed">{asset.description}</p>
+                  <p className="mt-3 text-slate-400 text-sm leading-relaxed">{description}</p>
                 </div>
                 <div className="mt-6 flex items-center justify-between gap-3">
                   <div>
@@ -172,7 +177,8 @@ export default function MarketplacePage() {
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           {message && <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900 p-4 text-sm text-slate-300">{message}</div>}
