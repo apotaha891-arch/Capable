@@ -4,6 +4,7 @@ import { Sparkles, Send, Code2, Eye, Loader, Save, AlertCircle, CheckCircle, Clo
 import html2canvas from 'html2canvas';
 import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
+import ThemeToggle from '../components/ThemeToggle.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
 // Model tiers (same engine as the Builder). Higher tiers cost more but review harder.
@@ -22,24 +23,24 @@ const EDITOR_STATUS = [
 
 function DnsRow({ label, host, value, onCopy }) {
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs">
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 text-xs">
       <div className="grid grid-cols-[60px_1fr_auto] items-center gap-3">
-        <span className="font-bold text-indigo-300 font-mono">{label}</span>
+        <span className="font-bold text-indigo-500 dark:text-indigo-300 font-mono">{label}</span>
         <div className="min-w-0">
           <div className="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Host</div>
-          <div className="text-slate-200 font-mono truncate">{host}</div>
+          <div className="text-slate-700 dark:text-slate-200 font-mono truncate">{host}</div>
         </div>
-        <button onClick={() => onCopy(host)} className="text-slate-400 hover:text-white p-1.5 rounded hover:bg-slate-800" title="Copy host">
+        <button onClick={() => onCopy(host)} className="text-slate-400 hover:text-slate-900 dark:hover:text-white p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800" title="Copy host">
           <Copy size={12} />
         </button>
       </div>
-      <div className="grid grid-cols-[60px_1fr_auto] items-center gap-3 mt-2 pt-2 border-t border-slate-800">
+      <div className="grid grid-cols-[60px_1fr_auto] items-center gap-3 mt-2 pt-2 border-t border-slate-200 dark:border-slate-800">
         <span></span>
         <div className="min-w-0">
           <div className="text-slate-500 text-[10px] uppercase tracking-wider mb-0.5">Value</div>
-          <div className="text-slate-200 font-mono truncate">{value}</div>
+          <div className="text-slate-700 dark:text-slate-200 font-mono truncate">{value}</div>
         </div>
-        <button onClick={() => onCopy(value)} className="text-slate-400 hover:text-white p-1.5 rounded hover:bg-slate-800" title="Copy value">
+        <button onClick={() => onCopy(value)} className="text-slate-400 hover:text-slate-900 dark:hover:text-white p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800" title="Copy value">
           <Copy size={12} />
         </button>
       </div>
@@ -47,18 +48,20 @@ function DnsRow({ label, host, value, onCopy }) {
   );
 }
 
-const NEW_PROJECT_CODE = `<!DOCTYPE html>
-<html lang="en">
+// Placeholder shown in the preview for an empty project. Localized so an Arabic
+// session doesn't see English copy (the original bug from the editor screenshot).
+const newProjectCode = (isRTL) => `<!DOCTYPE html>
+<html lang="${isRTL ? 'ar' : 'en'}" dir="${isRTL ? 'rtl' : 'ltr'}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>New Project</title>
+  <title>${isRTL ? 'مشروع جديد' : 'New Project'}</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-slate-900 text-white flex items-center justify-center h-screen">
-  <div class="text-center">
-    <h1 class="text-5xl font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent mb-4">Start Building!</h1>
-    <p class="text-slate-400 text-lg">Describe what you want to create in the AI Assistant panel.</p>
+<body class="bg-slate-900 text-white flex items-center justify-center h-screen" style="font-family: ${isRTL ? "'Cairo', sans-serif" : 'system-ui, sans-serif'}">
+  <div class="text-center px-6">
+    <h1 class="text-5xl font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent mb-4">${isRTL ? 'لنبدأ البناء!' : 'Start Building!'}</h1>
+    <p class="text-slate-400 text-lg">${isRTL ? 'صِف ما تريد إنشاءه في لوحة المساعد الذكي على اليسار.' : 'Describe what you want to create in the AI Assistant panel.'}</p>
   </div>
 </body>
 </html>`;
@@ -136,7 +139,7 @@ export default function Editor() {
       .then(f => {
         if (f.length === 0) {
           // Fallback to single code if no files exist
-          const fallbackFile = { id: 'fallback', filename: 'index.html', content: loadedProject.code || NEW_PROJECT_CODE, file_type: 'html' };
+          const fallbackFile = { id: 'fallback', filename: 'index.html', content: loadedProject.code || newProjectCode(isRTL), file_type: 'html' };
           setFiles([fallbackFile]);
           setActiveFileId('fallback');
         } else {
@@ -496,13 +499,15 @@ export default function Editor() {
   };
 
   return (
-    <div className="h-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden">
+    <div className="h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100 flex flex-col overflow-hidden">
       {/* ── Navbar ── */}
-      <nav className="flex items-center gap-3 px-4 py-2.5 border-b border-slate-800 bg-slate-900 shrink-0">
-        <Link to="/" className="flex items-center gap-1.5 me-2">
-          <div className="bg-indigo-600 p-1.5 rounded-lg"><Sparkles size={16} /></div>
-          <span className="font-bold text-lg bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">Capable</span>
+      <nav className="flex items-center gap-2 px-3 sm:px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur shrink-0 shadow-sm dark:shadow-none z-20">
+        <Link to="/" className="flex items-center gap-2 shrink-0" title="Capable">
+          <div className="bg-capable-navy dark:bg-gradient-to-br dark:from-indigo-500 dark:to-cyan-400 p-1.5 rounded-lg text-white"><Sparkles size={16} /></div>
+          <span className="font-bold text-lg text-capable-navy dark:bg-gradient-to-r dark:from-indigo-400 dark:to-cyan-400 dark:bg-clip-text dark:text-transparent hidden sm:block">Capable</span>
         </Link>
+
+        <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 mx-1 hidden sm:block" />
 
         {/* Editable project name */}
         {editingName ? (
@@ -513,49 +518,52 @@ export default function Editor() {
             onBlur={() => setEditingName(false)}
             onKeyDown={e => e.key === 'Enter' && setEditingName(false)}
             autoFocus
-            className="bg-slate-800 border border-indigo-500 rounded px-2 py-1 text-sm text-white focus:outline-none w-48"
+            className="bg-white dark:bg-slate-800 border border-indigo-500 rounded-lg px-2.5 py-1.5 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 w-48"
           />
         ) : (
           <button
             onClick={() => setEditingName(true)}
-            className="text-slate-300 hover:text-white text-sm px-2 py-1 rounded hover:bg-slate-800 transition-colors truncate max-w-[180px]"
+            className="text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white text-sm font-medium px-2.5 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors truncate max-w-[160px] sm:max-w-[220px]"
             title={t('clickToRename')}
           >{projectName || t('untitled')}</button>
         )}
 
-        <button onClick={() => setShowSettings(true)} className="text-slate-400 hover:text-white transition-colors" title={t('settings')}>
-          <Settings size={18} />
+        <button onClick={() => setShowSettings(true)} className="text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0" title={t('settings')}>
+          <Settings size={16} />
         </button>
 
         <div className="flex items-center gap-2 ms-auto">
           {tokenInfo && (() => {
             const pct = Math.round((tokenInfo.tokens_used / tokenInfo.tokens_limit) * 100);
             const barColor = pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-amber-500' : 'bg-indigo-500';
-            const textColor = pct >= 90 ? 'text-red-400' : pct >= 75 ? 'text-amber-400' : 'text-indigo-400';
+            const textColor = pct >= 90 ? 'text-red-500 dark:text-red-400' : pct >= 75 ? 'text-amber-500 dark:text-amber-400' : 'text-indigo-500 dark:text-indigo-400';
             return (
-              <div className="hidden sm:flex items-center gap-2 bg-slate-800 rounded-lg px-3 py-1.5 text-xs">
+              <div className="hidden md:flex items-center gap-2 bg-slate-100 dark:bg-slate-800 rounded-lg px-3 py-1.5 text-xs">
                 <Zap size={12} className={textColor} />
-                <span className="text-slate-400">{t('aiCredits')}</span>
-                <div className="w-16 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                <span className="text-slate-500 dark:text-slate-400">{t('aiCredits')}</span>
+                <div className="w-16 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
                   <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${Math.min(100 - pct, 100)}%` }} />
                 </div>
               </div>
             );
           })()}
-              <button
+          <button
             onClick={() => { handleSave(); setTimeout(() => captureThumbnail(id), 500); }}
             disabled={saving}
-            className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors"
+            className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white px-3.5 py-1.5 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
           >
             {saving ? <Loader className="animate-spin" size={14} /> : <Save size={14} />}
-            {saving ? t('saving') : t('save')}
+            <span className="hidden sm:inline">{saving ? t('saving') : t('save')}</span>
           </button>
-          <button onClick={() => captureThumbnail(id)} className="bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-colors" title="Capture Thumbnail">
+          <button onClick={() => captureThumbnail(id)} className="border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 p-2 rounded-lg transition-colors" title={isRTL ? 'التقاط صورة مصغّرة' : 'Capture thumbnail'}>
             <Camera size={14} />
           </button>
+
+          <div className="h-6 w-px bg-slate-200 dark:bg-slate-800 mx-0.5" />
+
+          <ThemeToggle />
           <LangToggle />
-          <Link to="/dashboard" className="text-slate-400 hover:text-white text-sm">{t('myProjects')}</Link>
-          <Link to="/explore"   className="text-slate-400 hover:text-white text-sm">{t('explore')}</Link>
+          <Link to="/dashboard" className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white text-sm hidden lg:inline px-1">{t('myProjects')}</Link>
         </div>
       </nav>
 
@@ -598,14 +606,14 @@ export default function Editor() {
       {/* ── Body ── */}
       <div className="flex flex-1 overflow-hidden">
         {/* ── Sidebar (AI Assistant) ── */}
-        <div className="w-72 shrink-0 border-r border-slate-800 bg-slate-900/50 flex flex-col overflow-hidden">
+        <div className="w-72 shrink-0 border-e border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-900/50 flex flex-col overflow-hidden">
 
           {/* AI Assistant */}
           <div className="p-4 flex-1 flex flex-col min-h-0 overflow-y-auto">
-            <h2 className="text-sm font-bold text-white mb-1 flex items-center gap-1.5">
-              <Sparkles size={14} className="text-indigo-400" /> {t('aiAssistant')}
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white mb-1 flex items-center gap-1.5">
+              <Sparkles size={14} className="text-indigo-500 dark:text-indigo-400" /> {t('aiAssistant')}
             </h2>
-            <p className="text-[10px] text-slate-500 mb-3">{t('aiCreditsDesc')}</p>
+            <p className="text-[10px] text-slate-500 dark:text-slate-500 mb-3">{t('aiCreditsDesc')}</p>
 
             <form onSubmit={handleGenerate} className="flex flex-col gap-2">
               {/* Model tier selector — all tiers available; higher ones cost more. */}
@@ -620,7 +628,7 @@ export default function Editor() {
                     className={`flex-1 px-2 py-1 rounded-lg text-[10px] font-semibold border transition-all disabled:opacity-50
                       ${tier === tm.id
                         ? 'bg-indigo-600 border-indigo-500 text-white'
-                        : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:text-white hover:border-indigo-500/40'}`}
+                        : 'bg-white dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:border-indigo-500/40'}`}
                   >
                     {tm.name}
                   </button>
@@ -637,7 +645,7 @@ export default function Editor() {
                 placeholder={t('generatePlaceholder')}
                 disabled={loading}
                 rows={5}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-3 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none text-sm disabled:opacity-50"
+                className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none text-sm disabled:opacity-50"
               />
               <button
                 type="submit"
@@ -664,10 +672,10 @@ export default function Editor() {
 
             {/* ── History ── */}
             {history.length > 0 && (
-              <div className="mt-4 border-t border-slate-700 pt-3">
+              <div className="mt-4 border-t border-slate-200 dark:border-slate-700 pt-3">
                 <button
                   onClick={() => setShowHistory(h => !h)}
-                  className="flex items-center justify-between w-full text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 hover:text-slate-200"
+                  className="flex items-center justify-between w-full text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2 hover:text-slate-900 dark:hover:text-slate-200"
                 >
                   <span className="flex items-center gap-1"><Clock size={12} /> {t('history')} ({history.length})</span>
                   {showHistory ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
@@ -695,9 +703,9 @@ export default function Editor() {
                           setIframeKey(k => k + 1); 
                           setActiveTab('preview'); 
                         }}
-                        className="w-full text-left p-2 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors group"
+                        className="w-full text-left p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-transparent hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg transition-colors group"
                       >
-                        <div className="text-xs text-slate-200 group-hover:text-white truncate">{item.prompt}</div>
+                        <div className="text-xs text-slate-700 dark:text-slate-200 group-hover:text-slate-900 dark:group-hover:text-white truncate">{item.prompt}</div>
                         <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2">
                           <span>{item.time}</span>
                           {item.elapsed && <span className="text-emerald-500">⚡ {item.elapsed}s</span>}
@@ -712,23 +720,23 @@ export default function Editor() {
         </div>
 
         {/* ── Preview / Code Area ── */}
-        <div className="flex-1 flex flex-col bg-slate-900 overflow-hidden relative">
+        <div className="flex-1 flex flex-col bg-white dark:bg-slate-900 overflow-hidden relative">
           
           {/* Settings Modal */}
           {showSettings && (
             <div className="absolute inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[90vh] shadow-2xl flex flex-col overflow-hidden">
-                <div className="flex items-center justify-between p-5 border-b border-slate-800 shrink-0">
-                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                    <Settings size={20} className="text-indigo-400" /> {t('projectSettings')}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl w-full max-w-2xl max-h-[90vh] shadow-2xl flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between p-5 border-b border-slate-200 dark:border-slate-800 shrink-0">
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Settings size={20} className="text-indigo-500 dark:text-indigo-400" /> {t('projectSettings')}
                   </h3>
-                  <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white transition-colors">
+                  <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">
                     <X size={20} />
                   </button>
                 </div>
 
                 {/* Tabs */}
-                <div className="flex border-b border-slate-800 shrink-0">
+                <div className="flex border-b border-slate-200 dark:border-slate-800 shrink-0">
                   {[
                     ['general', t('lang') === 'ar' ? 'عام' : 'General'],
                     ['deployment', t('lang') === 'ar' ? 'النشر والدومين' : 'Deployment'],
@@ -736,7 +744,7 @@ export default function Editor() {
                     <button
                       key={key}
                       onClick={() => setSettingsTab(key)}
-                      className={`px-5 py-3 text-sm font-medium border-b-2 transition-colors ${settingsTab === key ? 'border-indigo-500 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+                      className={`px-5 py-3 text-sm font-medium border-b-2 transition-colors ${settingsTab === key ? 'border-indigo-500 text-indigo-600 dark:text-white' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'}`}
                     >{label}</button>
                   ))}
                 </div>
@@ -745,28 +753,28 @@ export default function Editor() {
                   {settingsTab === 'general' && (
                     <>
                       <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">{t('description')}</label>
+                        <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">{t('description')}</label>
                         <textarea
                           value={description} onChange={e => setDescription(e.target.value)}
-                          className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none min-h-[80px]"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white text-sm focus:border-indigo-500 focus:outline-none min-h-[80px]"
                           placeholder="e.g. A beautiful landing page for a SaaS..."
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">{t('thumbnailUrl')}</label>
+                        <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">{t('thumbnailUrl')}</label>
                         <input
                           type="url" value={thumbnailUrl} onChange={e => setThumbnailUrl(e.target.value)}
-                          className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none"
+                          className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white text-sm focus:border-indigo-500 focus:outline-none"
                           placeholder="https://example.com/image.png"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">{t('price')}</label>
+                        <label className="block text-sm font-medium text-slate-600 dark:text-slate-300 mb-1">{t('price')}</label>
                         <div className="relative">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
                           <input
                             type="number" min="0" value={price} onChange={e => setPrice(e.target.value)}
-                            className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none"
+                            className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl pl-8 pr-3 py-2 text-slate-900 dark:text-white text-sm focus:border-indigo-500 focus:outline-none"
                           />
                         </div>
                       </div>
@@ -776,9 +784,9 @@ export default function Editor() {
                   {settingsTab === 'deployment' && (
                     <div className="space-y-5">
                       {/* Custom domain block */}
-                      <div className="bg-slate-800/40 border border-slate-800 rounded-2xl p-4">
+                      <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
                         <div className="flex items-center justify-between mb-3">
-                          <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                          <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
                             <Globe size={15} className="text-emerald-400" />
                             {t('lang') === 'ar' ? 'النطاق المخصص' : 'Custom Domain'}
                           </h4>
@@ -815,7 +823,7 @@ export default function Editor() {
                           <input
                             type="text" value={customDomain} onChange={e => setCustomDomain(e.target.value.trim().toLowerCase())}
                             placeholder="app.example.com"
-                            className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:border-indigo-500 focus:outline-none"
+                            className="flex-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white text-sm focus:border-indigo-500 focus:outline-none"
                           />
                           <button
                             onClick={async () => { await handleSave(); await fetchDomainInfo(); }}
@@ -881,7 +889,7 @@ export default function Editor() {
                       <div className="bg-gradient-to-br from-indigo-900/30 to-purple-900/30 border border-indigo-700/30 rounded-2xl p-4">
                         <div className="flex items-start justify-between mb-3 gap-3">
                           <div>
-                            <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                            <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
                               <ShoppingBag size={15} className="text-indigo-300" />
                               {t('lang') === 'ar' ? 'ليس لديك دومين؟' : "Don't have a domain?"}
                             </h4>
@@ -907,8 +915,8 @@ export default function Editor() {
                   )}
                 </div>
 
-                <div className="p-5 border-t border-slate-800 flex justify-end gap-3 shrink-0">
-                  <button onClick={() => setShowSettings(false)} className="px-4 py-2 text-slate-300 hover:text-white text-sm font-medium">
+                <div className="p-5 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3 shrink-0">
+                  <button onClick={() => setShowSettings(false)} className="px-4 py-2 text-slate-500 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white text-sm font-medium">
                     {t('close')}
                   </button>
                   <button onClick={() => { handleSave(); setShowSettings(false); }} className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-lg shadow-indigo-500/20">
@@ -920,11 +928,11 @@ export default function Editor() {
           )}
 
           {/* Tabs */}
-          <div className="flex bg-slate-900 border-b border-slate-800">
+          <div className="flex bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
             {[['preview', <Eye size={14}/>, t('preview')], ['code', <Code2 size={14}/>, t('code')], ['files', <FolderOpen size={14}/>, t('lang') === 'ar' ? 'الملفات' : 'Files']].map(([tab, icon, label]) => (
               <button key={tab} onClick={() => setActiveTab(tab)}
                 className={`flex-1 py-2.5 text-sm font-medium flex items-center justify-center gap-1.5 border-b-2 transition-all ${
-                  activeTab === tab ? 'border-indigo-500 text-white' : 'border-transparent text-slate-400 hover:text-slate-200'
+                  activeTab === tab ? 'border-indigo-500 text-indigo-600 dark:text-white bg-white dark:bg-transparent' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
                 }`}
               >
                 {icon}{label}
@@ -956,16 +964,17 @@ export default function Editor() {
             />
 
             {activeTab === 'code' && activeFile && (
-              <div className="absolute inset-0 w-full h-full bg-slate-900 flex flex-col">
-                <div className="bg-slate-800/50 px-4 py-2 border-b border-slate-800 text-xs text-slate-400 flex items-center gap-2">
+              <div className="absolute inset-0 w-full h-full bg-slate-50 dark:bg-slate-900 flex flex-col">
+                <div className="bg-white dark:bg-slate-800/50 px-4 py-2 border-b border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
                   {getFileIcon(activeFile.filename)}
                   {activeFile.filename}
                 </div>
                 <textarea
                   value={activeFile.content}
                   onChange={e => setFiles(files.map(f => f.id === activeFileId ? { ...f, content: e.target.value } : f))}
-                  className="flex-1 w-full bg-slate-900 p-4 text-sm leading-relaxed text-slate-300 font-mono border-none focus:outline-none resize-none"
+                  className="flex-1 w-full bg-slate-50 dark:bg-slate-900 p-4 text-sm leading-relaxed text-slate-700 dark:text-slate-300 font-mono border-none focus:outline-none resize-none"
                   spellCheck={false}
+                  dir="ltr"
                 />
               </div>
             )}
@@ -977,11 +986,11 @@ export default function Editor() {
             )}
 
             {activeTab === 'files' && (
-              <div className="absolute inset-0 w-full h-full bg-slate-900 flex flex-col overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800 shrink-0">
+              <div className="absolute inset-0 w-full h-full bg-slate-50 dark:bg-slate-900 flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 dark:border-slate-800 shrink-0">
                   <div className="flex items-center gap-2">
-                    <FolderOpen size={16} className="text-indigo-400" />
-                    <span className="text-sm font-bold text-white">{t('lang') === 'ar' ? 'ملفات المشروع' : 'Project Files'}</span>
+                    <FolderOpen size={16} className="text-indigo-500 dark:text-indigo-400" />
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">{t('lang') === 'ar' ? 'ملفات المشروع' : 'Project Files'}</span>
                     <span className="text-xs text-slate-500">({files.length})</span>
                   </div>
                   <button
@@ -1002,11 +1011,11 @@ export default function Editor() {
                         <div
                           key={f.id}
                           onClick={() => { setActiveFileId(f.id); setActiveTab('code'); }}
-                          className={`group relative flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer border transition-colors ${activeFileId === f.id ? 'bg-indigo-600/15 border-indigo-500/50' : 'bg-slate-800/40 border-slate-800 hover:bg-slate-800 hover:border-slate-700'}`}
+                          className={`group relative flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer border transition-colors ${activeFileId === f.id ? 'bg-indigo-50 dark:bg-indigo-600/15 border-indigo-300 dark:border-indigo-500/50' : 'bg-white dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-700'}`}
                         >
                           <div className="shrink-0">{getFileIcon(f.filename)}</div>
                           <div className="min-w-0 flex-1">
-                            <div className="text-sm text-slate-200 truncate">{f.filename}</div>
+                            <div className="text-sm text-slate-700 dark:text-slate-200 truncate">{f.filename}</div>
                             <div className="text-[10px] text-slate-500 uppercase tracking-wider">{(f.filename.split('.').pop() || '').toUpperCase()}</div>
                           </div>
                           <button
