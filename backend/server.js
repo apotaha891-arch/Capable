@@ -559,6 +559,33 @@ app.use('/hosted', (req, res, next) => {
 
 app.use('/hosted', express.static(hostedDir));
 
+// DB fallback for published code pages. express.static above handles the fast
+// path; if the file is missing (e.g. the persistent volume was reset between
+// deploys) we serve the project's HTML straight from the database by slug and
+// re-materialize it to disk so later hits go static again. Without this, links
+// 404 even though the code is safe in the projects table.
+app.get(['/hosted/:slug', '/hosted/:slug/index.html'], async (req, res, next) => {
+  const { slug } = req.params;
+  if (slug === 'thumbnails') return next();
+  try {
+    const { rows } = await pool.query(
+      'SELECT code FROM projects WHERE published_slug = $1 AND is_published = true LIMIT 1',
+      [slug]
+    );
+    if (!rows[0] || !rows[0].code) return next();
+    const html = injectTracking(rows[0].code, slug);
+    try {
+      const dir = path.join(hostedDir, slug);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'index.html'), html, 'utf-8');
+    } catch { /* read-only fs is fine — we still serve from memory */ }
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch {
+    next();
+  }
+});
+
 // Auth middleware
 function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
