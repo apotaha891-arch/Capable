@@ -21,6 +21,24 @@ module.exports = {
           muted:   '#6B7280',  // secondary text
           surface: '#F3F4F6',  // light bg
         },
+        // Brand accent. The app was built on Tailwind's default `indigo`
+        // (a purple-leaning hue); we remap the whole `indigo-*` scale to the
+        // brand blue (Light Blue #4A7BC8 → Navy #1F4788) so every existing
+        // indigo utility — buttons, links, gradients, hovers — renders on-brand
+        // without touching hundreds of call sites.
+        indigo: {
+          50:  '#EFF4FB',
+          100: '#D8E5F5',
+          200: '#B6CDEA',
+          300: '#8FB1DC',
+          400: '#6B97D1',
+          500: '#4A7BC8',  // = capable.light (accent)
+          600: '#3C68B2',  // primary buttons
+          700: '#2E5FA3',  // = capable.medium
+          800: '#244B85',
+          900: '#1F4788',  // = capable.navy
+          950: '#16335F',
+        },
       },
       fontFamily: {
         sans: ['Arial', 'Helvetica', 'sans-serif'],
