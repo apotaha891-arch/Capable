@@ -2271,17 +2271,41 @@ app.post('/api/generate', authMiddleware, async (req, res) => {
       return [...map.values()];
     };
 
-    // Editor edits run on the open-weight generator (cheap, surgical). Building a
-    // site from scratch (no existing files) upgrades to Gemini for quality.
-    const generator = existingFiles.length ? tierCfg.generator : initialGenerator(tierCfg.generator);
-
     // Step 1 — the generator writes ONLY the changed/new files; we merge them over
-    // the current project. For a brand-new project there is nothing to merge, so
-    // the generator's output is the whole site.
-    let { files: changedFiles, usage: genUsage } = await generateFiles(anthropic, generator, effectiveHistory, prompt);
-    logStep(generator.model, `generate:${tier}`, genUsage);
+    // the current project. A provider fallback chain means one provider running dry
+    // (rate limit, depleted balance, transient error) doesn't fail the whole
+    // generation: try the tier's generator, then Claude, then Gemini — deduped to
+    // whatever is actually configured. The generator that succeeds is reused for
+    // the revise step below.
+    const candidateGenerators = [tierCfg.generator];
+    if (anthropic) candidateGenerators.push({ provider: 'anthropic', model: SONNET_MODEL });
+    if (process.env.GEMINI_API_KEY) candidateGenerators.push(GEMINI_GENERATOR);
+    const seenGen = new Set();
+    const generatorChain = candidateGenerators.filter((g) => {
+      const k = `${g.provider}:${g.model}`;
+      if (seenGen.has(k)) return false;
+      seenGen.add(k);
+      return true;
+    });
+
+    let changedFiles = [], generator = generatorChain[0], lastGenErr = null;
+    for (const gen of generatorChain) {
+      try {
+        const out = await generateFiles(anthropic, gen, effectiveHistory, prompt);
+        if (out.files && out.files.length) {
+          changedFiles = out.files;
+          generator = gen;
+          logStep(gen.model, `generate:${tier}`, out.usage);
+          break;
+        }
+        lastGenErr = new Error('empty or unparseable response');
+      } catch (err) {
+        lastGenErr = err;
+        console.warn(`generator ${gen.provider}/${gen.model} failed, trying next: ${err.message}`);
+      }
+    }
     if (!changedFiles.length) {
-      return res.status(502).json({ error: 'Failed to generate', details: 'The generator response could not be parsed. Please try again.' });
+      return res.status(502).json({ error: 'Failed to generate', details: lastGenErr ? String(lastGenErr.message || lastGenErr).slice(0, 200) : 'All providers failed. Please try again.' });
     }
     let files = existingFiles.length ? mergeFiles(existingFiles, changedFiles) : changedFiles;
 
