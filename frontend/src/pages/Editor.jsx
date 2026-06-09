@@ -604,9 +604,9 @@ export default function Editor() {
       )}
 
       {/* ── Body ── */}
-      <div className="flex flex-1 overflow-hidden gap-3 p-3 bg-slate-100 dark:bg-slate-950">
+      <div className="flex flex-1 overflow-hidden gap-3 p-3 bg-slate-200 dark:bg-black">
         {/* ── Sidebar (AI Assistant) ── */}
-        <div className="w-72 shrink-0 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm flex flex-col overflow-hidden">
+        <div className="w-72 shrink-0 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-md flex flex-col overflow-hidden">
 
           {/* AI Assistant */}
           <div className="p-4 flex-1 flex flex-col min-h-0 overflow-y-auto">
@@ -720,7 +720,7 @@ export default function Editor() {
         </div>
 
         {/* ── Preview / Code Area ── */}
-        <div className="flex-1 flex flex-col rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden relative">
+        <div className="flex-1 flex flex-col rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-md overflow-hidden relative">
           
           {/* Settings Modal */}
           {showSettings && (
