@@ -2167,6 +2167,10 @@ app.get('/api/blueprint/health', (req, res) => {
     provider: activeProviderName(),
     groq_keyed: !!process.env.GROQ_API_KEY,
     gemini_keyed: !!process.env.GEMINI_API_KEY,
+    // Booleans only — never the secret values. Lets us confirm the backend
+    // actually sees the Stripe env vars after a Railway redeploy.
+    stripe_configured: !!stripe,
+    stripe_webhook_configured: !!process.env.STRIPE_WEBHOOK_SECRET,
   });
 });
 
