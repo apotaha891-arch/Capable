@@ -235,7 +235,7 @@ export default function Dashboard() {
               <Tag size={14} /> {lang === 'ar' ? 'السوق' : 'Marketplace'}
             </Link>
             <Link to="/docs" className="flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
-              <HelpCircle size={14} /> {lang === 'ar' ? 'التوثيق' : 'Docs'}
+              <HelpCircle size={14} /> {lang === 'ar' ? 'الدليل' : 'Guide'}
             </Link>
             <button className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-800 rounded-lg transition-colors">
               <Settings size={14} /> {lang === 'ar' ? 'الإعدادات' : 'Settings'}

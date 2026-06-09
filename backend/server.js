@@ -1374,9 +1374,10 @@ app.get('/api/biz/assets', authMiddleware, async (req, res) => {
     const { rows } = await pool.query(
       `SELECT a.id, a.slug, a.title, a.description, a.price, a.metadata,
               COALESCE(a.adoption_count, 0) AS adoption_count, a.project_id, a.creator_id,
-              u.name AS creator_name
+              u.name AS creator_name, pr.thumbnail_url AS thumbnail_url
          FROM licensed_assets a
          LEFT JOIN users u ON u.id = a.creator_id
+         LEFT JOIN projects pr ON pr.id = a.project_id
         ORDER BY COALESCE(a.adoption_count, 0) DESC, a.created_at DESC`
     );
     res.json(rows);

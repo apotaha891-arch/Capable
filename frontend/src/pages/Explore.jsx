@@ -113,6 +113,10 @@ export default function Explore() {
         <div className="text-center mb-10">
           <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">{t('exploreTitle')}</h1>
           <p className="text-lg text-slate-400 max-w-2xl mx-auto">{t('exploreDesc')}</p>
+          <p className="text-xs text-slate-500 max-w-2xl mx-auto mt-2">
+            {lang === 'ar' ? 'معرض مجاني للإلهام — استنسخ أي مشروع عام بلا مقابل. لشراء وحدات جاهزة أو بيع مشروعك، زر ' : 'A free gallery for inspiration — clone any public project at no cost. To buy ready modules or sell your own, visit '}
+            <Link to="/marketplace" className="text-cyan-400 hover:underline">{lang === 'ar' ? 'المتجر' : 'Marketplace'}</Link>.
+          </p>
         </div>
 
         {/* Field filter bar */}

@@ -395,13 +395,13 @@ export default function DocsPage() {
       <header className="sticky top-0 z-30 flex items-center gap-3 px-4 sm:px-6 py-3 border-b border-gray-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur">
         <Logo to="/" size="sm" wordClassName="hidden sm:block" />
         <span className="text-gray-300 dark:text-slate-700 hidden sm:inline">/</span>
-        <span className="text-sm text-capable-muted dark:text-slate-400 hidden sm:inline">{L(lang, 'Docs', 'التوثيق')}</span>
+        <span className="text-sm text-capable-muted dark:text-slate-400 hidden sm:inline">{L(lang, 'Guide', 'الدليل')}</span>
         <div className="relative flex-1 max-w-sm ms-auto">
           <Search size={15} className="absolute top-1/2 -translate-y-1/2 start-3 text-capable-muted dark:text-slate-500" />
           <input
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder={L(lang, 'Search docs…', 'ابحث في التوثيق…')}
+            placeholder={L(lang, 'Search the guide…', 'ابحث في الدليل…')}
             className="w-full h-9 rounded-lg ps-9 pe-3 text-sm bg-capable-surface dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-capable-text dark:text-white placeholder-capable-muted dark:placeholder-slate-500 focus:outline-none focus:border-indigo-500"
           />
         </div>

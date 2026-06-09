@@ -97,6 +97,10 @@ export default function MarketplacePage() {
               <p className="mt-3 text-slate-400 max-w-2xl leading-relaxed">
                 {ar ? 'تبنَّ وحدات مُجرّبة من منشئين آخرين — تُنسخ مباشرة إلى مشاريعك. أو انشر مشروعك واكسب من كل تبنٍّ.' : 'Adopt proven modules from other creators — copied straight into your projects. Or list your own and earn on every adoption.'}
               </p>
+              <p className="mt-2 text-xs text-slate-500">
+                {ar ? 'هذا مكان البيع والشراء. للتصفّح المجاني والإلهام بلا شراء، زر ' : 'This is where you buy & sell. Just browsing for inspiration (free)? Visit '}
+                <Link to="/explore" className="text-cyan-400 hover:underline">{ar ? 'استكشف' : 'Explore'}</Link>.
+              </p>
             </div>
             <button
               onClick={() => setShowList((s) => !s)}
@@ -142,9 +146,21 @@ export default function MarketplacePage() {
               // Arabic; fall back to the stored (creator-language) content.
               const title = (ar && asset.metadata?.title_ar) || asset.title;
               const description = (ar && asset.metadata?.description_ar) || asset.description;
+              // Skip thumbnails saved with a localhost base (old captures) — show a
+              // branded placeholder instead of a broken image.
+              const thumb = asset.thumbnail_url && !/\/\/localhost|:5000\//.test(asset.thumbnail_url) ? asset.thumbnail_url : null;
               return (
               <div key={asset.id} className="rounded-3xl border border-slate-800 bg-slate-950 p-6 flex flex-col justify-between">
                 <div>
+                  <div className="aspect-video rounded-2xl overflow-hidden mb-4 bg-slate-900 border border-slate-800">
+                    {thumb ? (
+                      <img src={thumb} alt={title} loading="lazy" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-900/40 to-slate-900">
+                        <Store className="text-indigo-400/50" size={28} />
+                      </div>
+                    )}
+                  </div>
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-xs text-slate-500 uppercase tracking-[0.2em]">
                       <Tag size={13} /> {asset.slug}

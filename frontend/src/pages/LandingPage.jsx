@@ -307,7 +307,7 @@ export default function LandingPage() {
               {t('ecoNav')}
             </a>
             <Link to="/docs" className="hidden md:inline text-capable-text dark:text-slate-300 hover:text-capable-navy dark:hover:text-white transition-colors px-2">
-              {isRTL ? 'التوثيق' : 'Docs'}
+              {isRTL ? 'الدليل' : 'Guide'}
             </Link>
             <Link to="/dashboard" className="hidden sm:inline text-capable-text dark:text-slate-300 hover:text-capable-navy dark:hover:text-white transition-colors px-2">
               {t('dashboard')}
