@@ -678,11 +678,11 @@ let _anthropic = null;
 // Capable Builder model tiers. The user picks one per generation. Higher tiers
 // produce better output but burn more tokens, so callers should surface tighter
 // limits + an upgrade/downgrade choice on the expensive ones.
-//   capable1 — Gemini generates, Sonnet reviews   (cheapest, default)
-//   capable2 — Gemini generates, Opus reviews      (stronger review)
-//   capable3 — Sonnet generates, Opus reviews      (best quality, costly)
-// Default generator for the cheaper tiers: the open-weight model when keyed (big
-// cost saving), else Gemini. The reviewer stays a strong model so quality holds.
+//   capable1 — open-weight (Groq) generates, Sonnet reviews  (cheapest, default)
+//   capable2 — open-weight (Groq) generates, Opus reviews     (stronger review)
+//   capable3 — Sonnet generates, Opus reviews                 (best quality, costly)
+// The cheap-tier generator is the open-weight model when keyed (big cost saving),
+// else Gemini as a fallback. The reviewer stays a strong model so quality holds.
 const GEMINI_GENERATOR = { provider: 'gemini', model: GEMINI_MODEL };
 const OSS_GENERATOR = OSS_API_KEY
   ? { provider: 'openai', model: OSS_MODEL }
@@ -694,12 +694,14 @@ const BUILDER_TIERS = {
 };
 const DEFAULT_TIER = 'capable1';
 
-// Generating a full site from scratch needs more quality than open-weight models
-// (Llama via Groq) reliably give in one shot — and a weak generator triggers more
-// costly review/revise loops. So INITIAL generation upgrades an open-weight
-// generator to Gemini, while EDITOR edits keep the open-weight model (the surgical
-// edit is small, and the strong reviewer still guards quality).
-const initialGenerator = (gen) => (gen.provider === 'openai' ? GEMINI_GENERATOR : gen);
+// INITIAL generation used to upgrade the open-weight generator to Gemini for a
+// stronger one-shot build, but that made the default tiers depend on Gemini
+// (Google) billing — a single point of failure when those credits run out. Policy
+// now: the open-weight model generates in all cases (initial + edits) and the
+// strong reviewer (Sonnet/Opus) guards quality. If no open-weight key is set,
+// OSS_GENERATOR already falls back to Gemini. Kept as a one-line hook so the
+// generation policy stays easy to change in a single place.
+const initialGenerator = (gen) => gen;
 
 // Per-tier token budgets: every tier is available to every user, but the pricier
 // tiers get a tighter cap. When a user exhausts a tier they downgrade to a cheaper
