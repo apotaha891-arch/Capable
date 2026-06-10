@@ -2170,6 +2170,7 @@ app.get('/api/blueprint/health', (req, res) => {
     provider: activeProviderName(),
     groq_keyed: !!process.env.GROQ_API_KEY,
     gemini_keyed: !!process.env.GEMINI_API_KEY,
+    anthropic_keyed: !!process.env.ANTHROPIC_API_KEY,
     // Booleans only — never the secret values. Lets us confirm the backend
     // actually sees the Stripe env vars after a Railway redeploy.
     stripe_configured: !!stripe,
@@ -2323,18 +2324,25 @@ app.post('/api/generate', authMiddleware, async (req, res) => {
     let files = existingFiles.length ? mergeFiles(existingFiles, changedFiles) : changedFiles;
 
     // Step 2 — review the combined files; Step 3 — revise once if rejected.
+    // Review is best-effort: if the reviewer provider fails (no balance, rate
+    // limit, key issue), keep the successfully generated site instead of failing
+    // the whole request. The generator already produced a usable result.
     let reviewIssues = null, wasRevised = false;
     if (reviewEnabled) {
-      const combined = files.map(f => `=== ${f.filename} ===\n${f.content}`).join('\n\n');
-      const { verdict, usage: reviewUsage } = await reviewSite(anthropic, tierCfg.reviewer.model, prompt, combined);
-      logStep(tierCfg.reviewer.model, `review:${tier}`, reviewUsage);
-      if (verdict && verdict.approved === false && verdict.issues) {
-        reviewIssues = verdict.issues;
-        const reviseExtra = `A senior reviewer found these issues with the current project. Return ONLY the files you need to change to fix them (each with full content) as {"files":[...]}, fixing ONLY these issues and leaving every other file untouched:\n${verdict.issues}`;
-        const priorHistory = [...effectiveHistory, { prompt, code: JSON.stringify({ files }) }];
-        const revised = await generateFiles(anthropic, generator, priorHistory, prompt, reviseExtra);
-        logStep(generator.model, `revise:${tier}`, revised.usage);
-        if (revised.files.length) { files = mergeFiles(files, revised.files); wasRevised = true; }
+      try {
+        const combined = files.map(f => `=== ${f.filename} ===\n${f.content}`).join('\n\n');
+        const { verdict, usage: reviewUsage } = await reviewSite(anthropic, tierCfg.reviewer.model, prompt, combined);
+        logStep(tierCfg.reviewer.model, `review:${tier}`, reviewUsage);
+        if (verdict && verdict.approved === false && verdict.issues) {
+          reviewIssues = verdict.issues;
+          const reviseExtra = `A senior reviewer found these issues with the current project. Return ONLY the files you need to change to fix them (each with full content) as {"files":[...]}, fixing ONLY these issues and leaving every other file untouched:\n${verdict.issues}`;
+          const priorHistory = [...effectiveHistory, { prompt, code: JSON.stringify({ files }) }];
+          const revised = await generateFiles(anthropic, generator, priorHistory, prompt, reviseExtra);
+          logStep(generator.model, `revise:${tier}`, revised.usage);
+          if (revised.files.length) { files = mergeFiles(files, revised.files); wasRevised = true; }
+        }
+      } catch (err) {
+        console.warn(`review step failed (returning unreviewed output): ${err.message}`);
       }
     }
 
