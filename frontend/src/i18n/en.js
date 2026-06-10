@@ -22,7 +22,7 @@ const en = {
   growthSignalTitle: 'Ready to cross the finish line?',
   planConsultBadge: 'Book a Session',
   planConsultDesc: 'Hit a wall? Book a Capable engineer to finish your build.',
-  planConsultPrice: 'From $1,000',
+  planConsultPrice: 'Custom quote',
   planConsultTitle: 'Expert Help',
   planFreeBadge: 'Get Started',
   planFreeDesc: 'Perfect for exploring and experimenting.',

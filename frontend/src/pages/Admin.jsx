@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { LayoutDashboard, Users, FolderOpen, MessageSquare, DollarSign, Shield, ArrowLeft, Trophy, Boxes } from 'lucide-react';
+import { LayoutDashboard, Users, FolderOpen, MessageSquare, DollarSign, Shield, ArrowLeft, Trophy, Boxes, Bot } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
@@ -11,6 +11,7 @@ import CrmTab from '../admin/CrmTab.jsx';
 import FinanceTab from '../admin/FinanceTab.jsx';
 import ChallengesTab from '../admin/ChallengesTab.jsx';
 import EcosystemTab from '../admin/EcosystemTab.jsx';
+import AssistantTab from '../admin/AssistantTab.jsx';
 
 export default function Admin() {
   const { t, lang, isRTL } = useLang();
@@ -25,6 +26,7 @@ export default function Admin() {
     { id: 'finance', label: t('adminFinance'), icon: DollarSign, Comp: FinanceTab },
     { id: 'challenges', label: lang === 'ar' ? 'التحديات' : 'Challenges', icon: Trophy, Comp: ChallengesTab },
     { id: 'ecosystem', label: lang === 'ar' ? 'النظام البيئي' : 'Ecosystem', icon: Boxes, Comp: EcosystemTab },
+    { id: 'assistant', label: lang === 'ar' ? 'المساعد' : 'Assistant', icon: Bot, Comp: AssistantTab },
   ];
   const Active = tabs.find(x => x.id === tab).Comp;
 

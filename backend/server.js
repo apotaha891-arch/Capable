@@ -368,6 +368,29 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_leads_project ON leads(project_id, created_at);
 
+      -- Site assistant: visitor chat transcripts (one row per message).
+      CREATE TABLE IF NOT EXISTS assistant_messages (
+        id SERIAL PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        role TEXT NOT NULL,             -- 'user' | 'assistant'
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_assistant_messages_session ON assistant_messages(session_id, created_at);
+
+      -- Site assistant: captured leads + expert-session bookings.
+      CREATE TABLE IF NOT EXISTS assistant_leads (
+        id SERIAL PRIMARY KEY,
+        session_id TEXT,
+        name TEXT,
+        contact TEXT,                   -- email or phone
+        message TEXT,
+        wants_session BOOLEAN DEFAULT false,
+        status TEXT DEFAULT 'new',      -- new | contacted | booked | closed
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_assistant_leads_created ON assistant_leads(created_at DESC);
+
       -- Lock down the public PostgREST API. The backend connects as the table
       -- owner via DATABASE_URL and bypasses RLS, so it is unaffected. With RLS
       -- enabled and no policies, the anon/authenticated roles (reachable with the
@@ -2203,6 +2226,161 @@ app.get('/api/blueprint/health', (req, res) => {
     commit: (process.env.RAILWAY_GIT_COMMIT_SHA || '').slice(0, 7) || 'unknown',
     oss_generator: OSS_API_KEY ? OSS_MODEL : 'gemini-fallback',
   });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SITE ASSISTANT — visitor support chatbot. Answers from the guide, captures
+// leads / books expert sessions. Reuses the builder's provider chain.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Condensed platform knowledge base the assistant answers from. Keep factual.
+const ASSISTANT_KB = `
+Capable is an Arabic-first AI platform that turns an idea into a working web product. You describe what you want (Arabic or English) and Capable builds a real, editable, publishable site — no code needed. Flow: describe -> AI builds -> refine in chat -> publish.
+
+Two builders: a structured blueprint builder and a code editor (full HTML control). Paid plans can convert a blueprint into editable code.
+
+Plans:
+- Free ($0): explore and validate ideas, free publishing, template gallery, clone free templates.
+- Influence ($19/month): much more AI Design Credits, one custom domain, early access to new features, a say in the roadmap.
+- Pro ($49/month): even more credits, unlimited unbranded custom domains, priority processing and support.
+- Expert help (custom quote): a Capable engineer finishes the build.
+
+AI Design Credits are used only when the AI builds. Editing text/colors/code, previewing, publishing and cloning are always free. Each plan has a monthly credit budget plus a daily generation limit. Model tiers: Capable 1 (fast), Capable 2 (higher quality), Capable 3 (best).
+
+Publishing is free and unlimited on a Capable link (every site shows a "Made with Capable" badge). Custom domains are the paid feature (Influence includes one; Pro unlimited). Connect a domain from the editor: Capable shows the exact TXT + CNAME records, verifies, and provisions SSL automatically.
+
+Marketplace: buy/adopt licensed modules from creators (a copy is added to your projects); creators earn 70% per sale. Explore is a free gallery of public projects to clone for inspiration.
+
+Challenges: join, hit the goal in time, win tokens/credit/cash (the platform funds prizes). Influence Pass gives early access and a say in the roadmap.
+
+Arabic and RTL: built Arabic-first — auto-detects Arabic, sets RTL, uses Arabic fonts. You can mix Arabic and English in one prompt.
+
+Capable is for validation (ship fast, test, then scale). It builds front-end sites; for live databases/payments you integrate external services or export the code.
+`.trim();
+
+const ASSISTANT_SYSTEM = `You are Capable's friendly website assistant. Help visitors understand the platform and gently capture their interest.
+
+Rules:
+- Answer ONLY from the KNOWLEDGE below. If something is not covered, say you are not sure and offer to connect them with the team. Never invent features or prices.
+- Reply in the visitor's language (Arabic or English). Keep it warm, short and human — usually 1 to 3 sentences.
+- When a visitor shows buying intent, asks about expert help or detailed pricing, or wants to be contacted, warmly invite them to leave their name and email or phone, or to book a session — tell them to tap the "Talk to us" button in the chat. Do not ask for sensitive data and never be pushy.
+
+KNOWLEDGE:
+${ASSISTANT_KB}`;
+
+// Plain-text chat across the same provider chain as the builder (DeepSeek ->
+// Claude -> Gemini), so the assistant survives a provider running dry.
+async function assistantChat(messages) {
+  const chain = [];
+  if (OSS_API_KEY) chain.push('oss');
+  if (process.env.ANTHROPIC_API_KEY) chain.push('anthropic');
+  if (process.env.GEMINI_API_KEY) chain.push('gemini');
+  let lastErr = null;
+  for (const provider of chain) {
+    try {
+      if (provider === 'oss') {
+        const { text } = await openaiCompatChat({ model: OSS_MODEL, system: ASSISTANT_SYSTEM, messages, json: false });
+        if (text && text.trim()) return text.trim();
+      } else if (provider === 'anthropic') {
+        const a = getAnthropic();
+        const resp = await a.messages.create({
+          model: SONNET_MODEL, max_tokens: 700, system: ASSISTANT_SYSTEM,
+          messages: messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content || '') })),
+        });
+        const t = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+        if (t) return t;
+      } else if (provider === 'gemini') {
+        const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, systemInstruction: ASSISTANT_SYSTEM });
+        const hist = messages.slice(0, -1).map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: String(m.content || '') }] }));
+        const chat = model.startChat({ history: hist });
+        const r = (await chat.sendMessage(String(messages[messages.length - 1]?.content || ''))).response;
+        const t = (r.text() || '').trim();
+        if (t) return t;
+      }
+    } catch (err) {
+      lastErr = err;
+      console.warn(`assistant provider ${provider} failed: ${err.message}`);
+    }
+  }
+  throw lastErr || new Error('assistant unavailable');
+}
+
+// POST /api/assistant/chat — public. Body: { session_id, messages:[{role,content}] }.
+app.post('/api/assistant/chat', async (req, res) => {
+  try {
+    const sessionId = String(req.body.session_id || '').slice(0, 64) || `s_${Date.now()}`;
+    const incoming = Array.isArray(req.body.messages) ? req.body.messages.slice(-12) : [];
+    const cleaned = incoming
+      .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+      .map((m) => ({ role: m.role, content: m.content.slice(0, 2000) }));
+    if (!cleaned.length || cleaned[cleaned.length - 1].role !== 'user') {
+      return res.status(400).json({ error: 'A user message is required' });
+    }
+    const reply = await assistantChat(cleaned);
+    try {
+      const lastUser = cleaned[cleaned.length - 1];
+      await pool.query('INSERT INTO assistant_messages (session_id, role, content) VALUES ($1, $2, $3), ($1, $4, $5)',
+        [sessionId, 'user', lastUser.content, 'assistant', reply]);
+    } catch { /* transcript logging is best-effort */ }
+    res.json({ reply, session_id: sessionId });
+  } catch (err) {
+    res.status(503).json({ error: 'assistant_unavailable', details: err.message });
+  }
+});
+
+// POST /api/assistant/lead — public. Capture a contact / expert-session booking.
+app.post('/api/assistant/lead', async (req, res) => {
+  try {
+    const { session_id, name, contact, message, wants_session } = req.body || {};
+    if (!contact || !String(contact).trim()) return res.status(400).json({ error: 'Contact (email or phone) is required' });
+    const { rows } = await pool.query(
+      `INSERT INTO assistant_leads (session_id, name, contact, message, wants_session)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [String(session_id || '').slice(0, 64) || null, (name || '').slice(0, 120) || null, String(contact).slice(0, 200), (message || '').slice(0, 1000) || null, !!wants_session]
+    );
+    res.status(201).json({ success: true, id: rows[0].id });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save', details: err.message });
+  }
+});
+
+// GET /api/admin/assistant/leads — admin. Captured leads + bookings.
+app.get('/api/admin/assistant/leads', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM assistant_leads ORDER BY created_at DESC LIMIT 200');
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// GET /api/admin/assistant/conversations — admin. Grouped chat transcripts.
+app.get('/api/admin/assistant/conversations', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT session_id, COUNT(*)::int AS message_count,
+              MIN(created_at) AS started_at, MAX(created_at) AS last_at,
+              (ARRAY_AGG(content ORDER BY created_at))[1] AS first_message
+         FROM assistant_messages GROUP BY session_id
+        ORDER BY MAX(created_at) DESC LIMIT 100`
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// GET /api/admin/assistant/conversations/:sessionId — full transcript.
+app.get('/api/admin/assistant/conversations/:sessionId', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT role, content, created_at FROM assistant_messages WHERE session_id = $1 ORDER BY created_at',
+      [req.params.sessionId]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
 });
 
 // ══════════════════════════════════════════════════════════════════════════════

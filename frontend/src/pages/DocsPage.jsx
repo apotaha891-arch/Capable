@@ -9,6 +9,7 @@ import { useLang } from '../i18n/LangContext.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
 import LangToggle from '../components/LangToggle.jsx';
 import Logo from '../components/Logo.jsx';
+import ChatWidget from '../components/ChatWidget.jsx';
 
 // Bilingual helper: render Arabic or English given the active language.
 const L = (lang, en, ar) => (lang === 'ar' ? ar : en);
@@ -272,7 +273,7 @@ const SECTIONS = [
       <Table head={[L(lang, 'Plan', 'الباقة'), L(lang, 'Price', 'السعر'), L(lang, 'For', 'لـ')]} rows={[
         ['Free', '$0', L(lang, 'Exploring and validating ideas', 'الاستكشاف والتحقّق من الأفكار')],
         ['Pro', '$49 / ' + L(lang, 'month', 'شهر'), L(lang, 'Launching a real product (more credits, custom domain, priority support)', 'إطلاق منتج حقيقي (أرصدة أكثر، نطاق مخصص، دعم بأولوية)')],
-        [L(lang, 'Expert help', 'مساعدة الخبراء'), L(lang, 'From $1,000', 'من $1,000'), L(lang, 'A Capable engineer finishes your build', 'مهندس كيبابل يُنهي مشروعك')],
+        [L(lang, 'Expert help', 'مساعدة الخبراء'), L(lang, 'Custom quote', 'عرض سعر مخصّص'), L(lang, 'A Capable engineer finishes your build', 'مهندس كيبابل يُنهي مشروعك')],
       ]} />
       <P>{L(lang,
         'Payments are handled by Stripe (Visa, Mastercard, and regional cards such as Mada). Manage or cancel anytime from Settings → Billing; cancelling a custom domain returns the project to its free Capable link at the period end — the site stays live.',
@@ -475,6 +476,7 @@ export default function DocsPage() {
           )}
         </main>
       </div>
+      <ChatWidget />
     </div>
   );
 }

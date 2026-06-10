@@ -22,7 +22,7 @@ const ar = {
   growthSignalTitle: 'مستعد لإنهاء مشروعك؟',
   planConsultBadge: 'احجز جلسة',
   planConsultDesc: 'وصلت إلى عقبة؟ احجز مهندس من كيبل لإنهاء مشروعك.',
-  planConsultPrice: 'من $1,000',
+  planConsultPrice: 'عرض سعر مخصّص',
   planConsultTitle: 'مساعدة الخبراء',
   planFreeBadge: 'ابدأ الآن',
   planFreeDesc: 'مثالي للاستكشاف والتجربة.',
