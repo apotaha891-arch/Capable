@@ -9,14 +9,15 @@ export function siteUrl(slug) {
   return APP_DOMAIN ? `https://${slug}.${APP_DOMAIN}` : `${LOCAL_RENDERER}/${slug}`;
 }
 
-export function whatsappShareUrl(name, slug) {
-  const url = siteUrl(slug);
+// These take the already-resolved public URL (hosted for code projects, renderer
+// for blueprints) — the caller picks the right one. Passing a slug here would
+// wrongly force the renderer form for code projects, which live at /hosted/….
+export function whatsappShareUrl(name, url) {
   return `https://wa.me/?text=${encodeURIComponent(`${name} ${url}`)}`;
 }
 
 // Native share if available (mobile), else copy link. Returns the action taken.
-export async function shareSite(name, slug) {
-  const url = siteUrl(slug);
+export async function shareSite(name, url) {
   if (!url) return 'error';
   if (navigator.share) {
     try { await navigator.share({ title: name, url }); return 'shared'; }

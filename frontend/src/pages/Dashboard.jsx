@@ -352,7 +352,7 @@ function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
   const [shareOpen, setShareOpen] = useState(false);
 
   const onShare = async () => {
-    const action = await shareSite(project.name, project.published_slug);
+    const action = await shareSite(project.name, liveUrl);
     if (action === 'copied') { setCopied(true); setTimeout(() => setCopied(false), 1500); }
     else if (action === 'shared') { /* native sheet handled it */ }
     else setShareOpen(o => !o); // no native share + copy failed → show fallback menu
@@ -436,7 +436,7 @@ function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
               {shareOpen && (
                 <div className="absolute end-0 bottom-full mb-1 z-20 w-40 bg-slate-800 border border-slate-700 rounded-lg p-1 shadow-xl">
                   <a
-                    href={whatsappShareUrl(project.name, project.published_slug)}
+                    href={whatsappShareUrl(project.name, liveUrl)}
                     target="_blank" rel="noreferrer"
                     onClick={() => setShareOpen(false)}
                     className="flex items-center gap-2 px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-700 rounded"
@@ -444,7 +444,7 @@ function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
                     <MessageCircle size={13} className="text-green-400" /> WhatsApp
                   </a>
                   <button
-                    onClick={async () => { await navigator.clipboard.writeText(siteUrl(project.published_slug)); setCopied(true); setShareOpen(false); setTimeout(() => setCopied(false), 1500); }}
+                    onClick={async () => { await navigator.clipboard.writeText(liveUrl); setCopied(true); setShareOpen(false); setTimeout(() => setCopied(false), 1500); }}
                     className="w-full flex items-center gap-2 px-2 py-1.5 text-xs text-slate-200 hover:bg-slate-700 rounded"
                   >
                     <Link2 size={13} /> {lang === 'ar' ? 'نسخ الرابط' : 'Copy link'}
