@@ -542,6 +542,35 @@ function deviceFromUA(ua = '') {
   return 'desktop';
 }
 
+// "Made with Capable" badge baked into every published free site — the growth
+// loop (each published site advertises Capable). Shadow-DOM isolated so the
+// site's own CSS can't restyle or hide it; links back to the platform.
+function capableMadeBadge() {
+  const href = `${FRONTEND_URL}/?ref=made-badge`;
+  return `\n<script>(function(){
+  if (window.__capableMadeBadge) return; window.__capableMadeBadge = 1;
+  function mount(){
+    if (!document.body) { return setTimeout(mount, 60); }
+    var host = document.createElement('div');
+    host.setAttribute('dir','ltr');
+    host.style.cssText = 'position:fixed;bottom:14px;right:14px;z-index:2147483647;';
+    var root = host.attachShadow ? host.attachShadow({mode:'open'}) : host;
+    root.innerHTML =
+      '<style>a{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;'
+      + 'cursor:pointer;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:12px;'
+      + 'font-weight:600;color:#fff;background:#1F4788;padding:7px 12px;border-radius:9999px;'
+      + 'box-shadow:0 4px 14px rgba(31,71,136,.3);text-decoration:none;}'
+      + 'a:hover{background:#2E5FA3;}svg{display:block;flex:0 0 auto;}span{white-space:nowrap;}</style>'
+      + '<a href="${href}" target="_blank" rel="noopener noreferrer">'
+      + '<svg width="13" height="13" viewBox="0 0 48 48" fill="none" aria-hidden="true">'
+      + '<path d="M34.71 12.11 A16 16 0 1 0 34.71 35.89" stroke="#fff" stroke-width="6.5" stroke-linecap="round"/>'
+      + '</svg><span>Made with Capable</span></a>';
+    document.body.appendChild(host);
+  }
+  mount();
+})();</script>\n`;
+}
+
 // Tracking + lead-capture snippet injected into published code pages.
 function injectTracking(html, slug) {
   const base = process.env.BASE_URL || `http://localhost:${port}`;
@@ -550,7 +579,8 @@ try{fetch(B+'/api/track/'+S,{method:'POST',headers:{'Content-Type':'application/
 document.addEventListener('submit',function(e){var f=e.target;if(!f||f.tagName!=='FORM')return;var d={};try{new FormData(f).forEach(function(v,k){d[k]=v});}catch(_){}
 try{fetch(B+'/api/leads/'+S,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:location.pathname,fields:d})}).catch(function(){});}catch(e){}},true);})();</script>\n`;
   if (typeof html !== 'string') return html;
-  return html.includes('</body>') ? html.replace('</body>', snippet + '</body>') : html + snippet;
+  const inject = snippet + capableMadeBadge();
+  return html.includes('</body>') ? html.replace('</body>', inject + '</body>') : html + inject;
 }
 
 // Server-side view tracking for hosted code pages (works without re-publishing).
