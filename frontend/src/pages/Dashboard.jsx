@@ -364,6 +364,21 @@ function ProjectCard({ project, lang, t, onDelete, onPublish, onUnpublish }) {
       <Link to={editPath} className="block relative aspect-video bg-slate-950 overflow-hidden border-b border-slate-800">
         {hasThumb ? (
           <img src={project.thumbnail_url} alt={project.name} onError={() => setImgError(true)} className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform" />
+        ) : (project.is_published && liveUrl) ? (
+          // No custom thumbnail → live scaled preview of the published front page.
+          // Rendered at 4× and scaled to 0.25 so it looks like a desktop snapshot.
+          <div className="absolute inset-0 overflow-hidden bg-white">
+            <iframe
+              src={liveUrl}
+              title={project.name}
+              tabIndex={-1}
+              scrolling="no"
+              loading="lazy"
+              sandbox="allow-scripts allow-same-origin"
+              className="pointer-events-none border-0 origin-top-left"
+              style={{ width: '400%', height: '400%', transform: 'scale(0.25)' }}
+            />
+          </div>
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-indigo-900/40 to-slate-900 flex items-center justify-center relative">
             <div className="absolute inset-0 opacity-5" style={{ backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 20px,#6366f1 20px,#6366f1 21px),repeating-linear-gradient(90deg,transparent,transparent 20px,#6366f1 20px,#6366f1 21px)' }} />

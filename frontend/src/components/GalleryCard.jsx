@@ -29,6 +29,20 @@ export default function GalleryCard({ project, lang, t, onClone, onPreview, onDe
             onError={() => setImgError(true)}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           />
+        ) : project.previewUrl ? (
+          // No custom thumbnail → live scaled preview of the project's front page.
+          <div className="absolute inset-0 overflow-hidden bg-white">
+            <iframe
+              src={project.previewUrl}
+              title={primary}
+              tabIndex={-1}
+              scrolling="no"
+              loading="lazy"
+              sandbox="allow-scripts allow-same-origin"
+              className="pointer-events-none border-0 origin-top-left"
+              style={{ width: '400%', height: '400%', transform: 'scale(0.25)' }}
+            />
+          </div>
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-indigo-900/40 to-slate-900 flex items-center justify-center relative">
             <div className="absolute inset-0 opacity-5" style={{ backgroundImage: 'repeating-linear-gradient(0deg,transparent,transparent 22px,#6366f1 22px,#6366f1 23px),repeating-linear-gradient(90deg,transparent,transparent 22px,#6366f1 22px,#6366f1 23px)' }} />
