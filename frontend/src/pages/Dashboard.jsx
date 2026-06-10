@@ -8,6 +8,7 @@ import NotificationBell from '../components/NotificationBell.jsx';
 import { siteUrl, whatsappShareUrl, shareSite } from '../utils/site.js';
 import { hostedUrl } from '../utils/api.js';
 import Logo from '../components/Logo.jsx';
+import { ReviewWidget } from '../components/Reviews.jsx';
 
 const PLAN_COLORS = { free: 'text-slate-400', influence: 'text-cyan-400', pro: 'text-indigo-400', enterprise: 'text-amber-400' };
 const PLAN_LABELS = { free: 'Free', influence: 'Influence', pro: 'Pro', enterprise: 'Enterprise' };
@@ -244,6 +245,8 @@ export default function Dashboard() {
               <LogOut size={14} /> {lang === 'ar' ? 'تسجيل خروج' : 'Sign out'}
             </button>
           </div>
+
+          <ReviewWidget />
         </aside>
 
         {/* ── Projects area ───────────────────────────────── */}

@@ -391,6 +391,20 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_assistant_leads_created ON assistant_leads(created_at DESC);
 
+      -- Real platform reviews/ratings (one per user) → powers the legitimate
+      -- aggregateRating schema and the on-site social proof.
+      CREATE TABLE IF NOT EXISTS platform_reviews (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+        comment TEXT,
+        author_name TEXT,
+        approved BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_platform_reviews_created ON platform_reviews(created_at DESC);
+
       -- Lock down the public PostgREST API. The backend connects as the table
       -- owner via DATABASE_URL and bypasses RLS, so it is unaffected. With RLS
       -- enabled and no policies, the anon/authenticated roles (reachable with the
@@ -2379,6 +2393,58 @@ app.get('/api/admin/assistant/conversations/:sessionId', authMiddleware, adminMi
       [req.params.sessionId]
     );
     res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PLATFORM REVIEWS — real ratings that back the aggregateRating schema.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// POST /api/reviews — auth. Upsert the signed-in user's rating of the platform.
+app.post('/api/reviews', authMiddleware, async (req, res) => {
+  try {
+    const rating = parseInt(req.body.rating, 10);
+    if (!(rating >= 1 && rating <= 5)) return res.status(400).json({ error: 'rating must be 1-5' });
+    const comment = (req.body.comment || '').toString().slice(0, 600).trim() || null;
+    await pool.query(
+      `INSERT INTO platform_reviews (user_id, rating, comment, author_name, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET rating = $2, comment = $3, updated_at = NOW()`,
+      [req.user.id, rating, comment, req.user.name || null]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save review', details: err.message });
+  }
+});
+
+// GET /api/reviews/mine — auth. The current user's review, to prefill the widget.
+app.get('/api/reviews/mine', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT rating, comment FROM platform_reviews WHERE user_id = $1', [req.user.id]);
+    res.json(rows[0] || null);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// GET /api/reviews — public. Aggregate (average + count) and recent reviews with
+// comments, for the social-proof section and the legitimate aggregateRating.
+app.get('/api/reviews', async (req, res) => {
+  try {
+    const { rows: agg } = await pool.query(
+      `SELECT COUNT(*)::int AS count, COALESCE(ROUND(AVG(rating)::numeric, 1), 0) AS average
+         FROM platform_reviews WHERE approved = true`
+    );
+    const { rows: recent } = await pool.query(
+      `SELECT rating, comment, author_name, created_at
+         FROM platform_reviews
+        WHERE approved = true AND comment IS NOT NULL AND length(trim(comment)) > 0
+        ORDER BY created_at DESC LIMIT 8`
+    );
+    res.json({ count: agg[0].count, average: Number(agg[0].average), reviews: recent });
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
   }

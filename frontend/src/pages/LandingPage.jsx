@@ -11,6 +11,7 @@ import LangToggle from '../components/LangToggle.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
 import Logo from '../components/Logo.jsx';
 import ChatWidget from '../components/ChatWidget.jsx';
+import { Testimonials } from '../components/Reviews.jsx';
 import { API_BASE as API } from '../utils/api.js';
 
 // Users who ask for reduced motion get content revealed immediately, no animation.
@@ -709,6 +710,9 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      {/* ───────────── TESTIMONIALS (real ratings) ───────────── */}
+      <Testimonials />
 
       {/* ───────────── PRICING ───────────── */}
       <PricingSection t={t} isRTL={isRTL} />
