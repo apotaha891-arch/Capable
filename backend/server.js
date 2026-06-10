@@ -1059,17 +1059,10 @@ app.post('/api/projects/:id/publish', authMiddleware, async (req, res) => {
     const project = rows[0];
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
-    // Deploy-slot guard: publishing a not-yet-published project consumes a slot.
-    if (!project.is_published) {
-      const { rows: u } = await pool.query('SELECT plan, extra_deploy_slots FROM users WHERE id = $1', [req.user.id]);
-      const limit = effectiveDeployLimit(u[0].plan, u[0].extra_deploy_slots);
-      if (Number.isFinite(limit)) {
-        const { rows: c } = await pool.query('SELECT COUNT(*)::int AS n FROM projects WHERE user_id = $1 AND is_published = true', [req.user.id]);
-        if (c[0].n >= limit) {
-          return res.status(402).json({ error: 'deploy_limit_reached', deploys_count: c[0].n, deploys_limit: limit, plan: u[0].plan });
-        }
-      }
-    }
+    // Publishing to a Capable link is FREE and UNLIMITED — every published site
+    // carries the "Made with Capable" badge, which is the growth loop. The paid
+    // feature is the custom domain (gated separately in the domain routes), not
+    // the number of free Capable-hosted sites. (No deploy-slot guard here.)
 
     const slug = project.published_slug || `p-${req.params.id}-${Date.now().toString(36)}`;
     const projectDir = path.join(hostedDir, slug);

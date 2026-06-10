@@ -83,23 +83,15 @@ export default function ProjectPanel() {
 function Overview({ project, liveUrl, lang, authFetch, reload }) {
   const [a, setA] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [deployBlock, setDeployBlock] = useState(null); // { deploys_count, deploys_limit }
   useEffect(() => { authFetch(`/api/projects/${project.id}/analytics?days=14`).then(r => r.json()).then(setA).catch(() => setA(false)); }, [project.id]);
 
+  // Publishing to a Capable link is free and unlimited (the badge is the growth
+  // loop). No deploy-slot gating — the paid feature is the custom domain.
   const publish = async () => {
-    setBusy(true); setDeployBlock(null);
-    const res = await authFetch(`/api/projects/${project.id}/publish`, { method: 'POST' });
+    setBusy(true);
+    await authFetch(`/api/projects/${project.id}/publish`, { method: 'POST' });
     setBusy(false);
-    if (res.status === 402) {
-      const d = await res.json().catch(() => ({}));
-      if (d.error === 'deploy_limit_reached') { setDeployBlock(d); return; }
-    }
     reload();
-  };
-  const buyDeploySlot = async () => {
-    const res = await authFetch('/api/biz/deploy-slots', { method: 'POST', body: JSON.stringify({ quantity: 1 }) });
-    const d = await res.json().catch(() => ({}));
-    if (d.url) window.location.href = d.url;
   };
   const unpublish = async () => {
     setBusy(true);
@@ -137,26 +129,11 @@ function Overview({ project, liveUrl, lang, authFetch, reload }) {
           </div>
         )}
 
-        {deployBlock && (
-          <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
-            <div className="flex items-start gap-2">
-              <Lock size={14} className="text-amber-400 shrink-0 mt-0.5" />
-              <p className="text-sm text-amber-200 leading-relaxed">
-                {tt(lang,
-                  `You've used all your deployable slots (${deployBlock.deploys_count}/${deployBlock.deploys_limit}). Add a slot for $5/mo, or upgrade your plan for more.`,
-                  `استخدمت كل خانات النشر المتاحة (${deployBlock.deploys_count}/${deployBlock.deploys_limit}). أضف خانة مقابل ٥$ شهرياً، أو رقِّ باقتك للمزيد.`)}
-              </p>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button onClick={buyDeploySlot} className="text-sm bg-amber-600 hover:bg-amber-500 text-white px-4 py-2 rounded-lg">
-                {tt(lang, 'Add a deploy slot ($5/mo)', 'أضف خانة نشر (٥$ شهرياً)')}
-              </button>
-              <Link to="/influence" className="text-sm border border-slate-700 hover:border-indigo-500 hover:text-indigo-300 text-slate-300 px-4 py-2 rounded-lg">
-                {tt(lang, 'Upgrade plan', 'ترقية الباقة')}
-              </Link>
-            </div>
-          </div>
-        )}
+        <p className="mt-3 text-xs text-slate-500">
+          {tt(lang,
+            'Free, unlimited publishing on a Capable link (with a "Made with Capable" badge). Want your own domain? Connect a custom domain from the editor — that\'s the paid upgrade.',
+            'نشر مجاني وغير محدود على رابط كيبابل (مع بادج «تم إنشاؤه على كيبابل»). تريد نطاقك الخاص؟ اربط نطاقاً مخصصاً من المحرّر — تلك هي الترقية المدفوعة.')}
+        </p>
       </div>
 
       {a && a.series && (
