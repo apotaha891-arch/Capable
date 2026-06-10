@@ -8,10 +8,13 @@ import BlueprintPreview from '../blueprint/BlueprintPreview.jsx';
 import FieldEditor from '../blueprint/FieldEditor.jsx';
 import { BLOCK_DEFAULTS, BLOCK_TYPES, newBlockId } from '../blueprint/blockDefaults.js';
 import { blockLabel } from '../blueprint/labels.js';
-import { siteUrl } from '../utils/site.js';
 
 // Plans that may open a blueprint project in the code editor (المحرر).
 const CODE_EDITOR_PLANS = ['influence', 'pro', 'enterprise'];
+
+// Arabic-friendly font choices + UI languages offered in the theme panel.
+const FONT_OPTIONS = ['Cairo', 'Tajawal', 'Almarai', 'Noto Kufi Arabic', 'IBM Plex Sans Arabic', 'Inter', 'Poppins', 'Roboto'];
+const LANG_OPTIONS = ['ar', 'en'];
 
 // Serialize a blueprint to a standalone, editable HTML document (Tailwind CDN +
 // font + theme), reusing the same preview component the editor renders with.
@@ -131,7 +134,15 @@ export default function BlueprintEditor() {
     </Center>
   );
 
-  const liveUrl = project?.published_slug ? siteUrl(project.published_slug) : null;
+  // Open a self-contained preview of the CURRENT blueprint in a new tab. Renders
+  // client-side (no external renderer / VITE_RENDERER_URL dependency), so it works
+  // regardless of deploy config and reflects unsaved edits.
+  const openPreview = () => {
+    const html = toStandaloneHtml(bp);
+    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  };
   const block = bp.blocks[selected];
 
   return (
@@ -148,7 +159,7 @@ export default function BlueprintEditor() {
         </div>
         <div className="flex items-center gap-2">
           {error && <span className="text-amber-400 text-xs flex items-center gap-1 max-w-xs truncate"><AlertTriangle size={14} />{error}</span>}
-          {liveUrl && <a href={liveUrl} target="_blank" rel="noopener noreferrer" className="text-sm text-slate-300 hover:text-white flex items-center gap-1 px-3 py-2">{ar ? 'عرض' : 'View'} <ExternalLink size={14} /></a>}
+          <button onClick={openPreview} title={ar ? 'معاينة في تبويب جديد' : 'Preview in a new tab'} className="text-sm text-slate-300 hover:text-white flex items-center gap-1 px-3 py-2">{ar ? 'عرض' : 'View'} <ExternalLink size={14} /></button>
           <button
             onClick={openInCodeEditor}
             disabled={converting}
@@ -175,16 +186,10 @@ export default function BlueprintEditor() {
             <div className="grid grid-cols-2 gap-3">
               <ColorField label={ar ? 'أساسي' : 'Primary'} value={bp.theme.primary_color} onChange={v => updateTheme('primary_color', v)} />
               <ColorField label={ar ? 'ثانوي' : 'Secondary'} value={bp.theme.secondary_color} onChange={v => updateTheme('secondary_color', v)} />
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">{ar ? 'الخط' : 'Font'}</label>
-                <input value={bp.theme.font_family} onChange={e => updateTheme('font_family', e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm" />
-              </div>
+              <SelectField label={ar ? 'الخط' : 'Font'} value={bp.theme.font_family} options={[...new Set([bp.theme.font_family, ...FONT_OPTIONS].filter(Boolean))]} onChange={v => updateTheme('font_family', v)} />
               <SelectField label={ar ? 'الزوايا' : 'Radius'} value={bp.theme.border_radius} options={['none', 'sm', 'md', 'lg', 'full']} onChange={v => updateTheme('border_radius', v)} />
               <SelectField label={ar ? 'الاتجاه' : 'Direction'} value={bp.direction} options={['rtl', 'ltr']} onChange={v => update({ ...bp, direction: v })} />
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">{ar ? 'اللغة' : 'Lang'}</label>
-                <input value={bp.language} onChange={e => update({ ...bp, language: e.target.value })} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm" />
-              </div>
+              <SelectField label={ar ? 'اللغة' : 'Lang'} value={bp.language} options={[...new Set([bp.language, ...LANG_OPTIONS].filter(Boolean))]} onChange={v => update({ ...bp, language: v })} />
             </div>
           </section>
 
