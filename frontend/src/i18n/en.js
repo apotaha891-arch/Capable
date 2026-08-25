@@ -163,6 +163,7 @@ const en = {
   instantSiteNamePlaceholder: 'e.g. Al Waha Restaurant',
   instantWhatsappLabel: 'Your WhatsApp number',
   instantWhatsappHint: "We'll put this on your site so customers can reach you directly.",
+  instantPreviewCta: 'Contact us',
   instantBack: 'Back',
   instantNext: 'Next',
   instantPayNow: 'Pay & go live',

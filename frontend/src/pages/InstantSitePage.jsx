@@ -55,6 +55,43 @@ const STEP_TITLES = {
   en: ['Project type', 'Details', 'Style', 'Preview & pay'],
 };
 
+function SitePreviewMock({ tierObj, siteName, detail, styleObj, isRTL, t }) {
+  const dark = styleObj.dark;
+  const fg = dark ? '#F8FAFC' : styleObj.primary;
+  const muted = dark ? '#94A3B8' : '#6B7280';
+  return (
+    <div
+      className="rounded-2xl border border-gray-200 dark:border-slate-800 overflow-hidden mb-6 shadow-sm"
+      style={{ background: dark ? '#0B1220' : '#fff' }}
+    >
+      <div className="flex items-center gap-1.5 px-3 py-2 bg-gray-100 dark:bg-slate-800/60 border-b border-gray-200 dark:border-slate-800">
+        <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
+        <span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
+        <span className="w-2.5 h-2.5 rounded-full bg-green-400" />
+      </div>
+      <div className="p-6" dir={isRTL ? 'rtl' : 'ltr'}>
+        <div className="flex items-center justify-between mb-8">
+          <span className="font-bold text-sm truncate" style={{ color: fg }}>
+            {siteName || t('instantSiteNamePlaceholder')}
+          </span>
+          <span className="text-xl shrink-0">{tierObj.icon}</span>
+        </div>
+        <h3 className="text-lg font-bold mb-2" style={{ color: fg }}>
+          {siteName || t('instantSiteNamePlaceholder')}
+        </h3>
+        {detail && <p className="text-xs mb-5" style={{ color: muted }}>{detail}</p>}
+        <button
+          type="button"
+          className="text-xs font-semibold px-4 py-2"
+          style={{ background: styleObj.primary, color: '#fff', borderRadius: styleObj.radius }}
+        >
+          {t('instantPreviewCta')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ProgressBar({ step, isRTL }) {
   const titles = STEP_TITLES[isRTL ? 'ar' : 'en'];
   return (
@@ -278,6 +315,7 @@ export default function InstantSitePage() {
               <>
                 <h2 className="text-lg font-bold text-capable-navy dark:text-white mb-1">{t('instantStep4Heading')}</h2>
                 <p className="text-sm text-capable-muted dark:text-slate-400 mb-6">{t('instantStep4Help')}</p>
+                <SitePreviewMock tierObj={tierObj} siteName={siteName} detail={detail} styleObj={styleObj} isRTL={isRTL} t={t} />
                 <ul className="space-y-3 mb-6">
                   <li className="flex items-center gap-2 text-sm text-capable-text dark:text-slate-300">
                     <CheckCircle2 size={16} className="text-capable-success shrink-0" />

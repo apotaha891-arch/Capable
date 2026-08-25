@@ -163,6 +163,7 @@ const ar = {
   instantSiteNamePlaceholder: 'مثال: مطعم الواحة',
   instantWhatsappLabel: 'رقم الواتساب الخاص بك',
   instantWhatsappHint: 'سنضع هذا الرقم في موقعك ليتواصل معك عملاؤك مباشرة.',
+  instantPreviewCta: 'تواصل معنا',
   instantBack: 'رجوع',
   instantNext: 'التالي',
   instantPayNow: 'ادفع وفعّل موقعك',
