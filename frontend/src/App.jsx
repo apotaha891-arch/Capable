@@ -16,6 +16,9 @@ import InfluencePage from './pages/InfluencePage.jsx';
 import ChallengesPage from './pages/ChallengesPage.jsx';
 import MarketplacePage from './pages/MarketplacePage.jsx';
 import DocsPage from './pages/DocsPage.jsx';
+import InstantSitePage from './pages/InstantSitePage.jsx';
+import InstantSiteReady from './pages/InstantSiteReady.jsx';
+import LaunchOfferPage from './pages/LaunchOfferPage.jsx';
 
 // Protected route wrapper
 function ProtectedRoute({ children }) {
@@ -48,6 +51,9 @@ function AppRoutes() {
       <Route path="/auth" element={<AuthPage />} />
       <Route path="/explore" element={<Explore />} />
       <Route path="/docs" element={<DocsPage />} />
+      <Route path="/instant" element={<InstantSitePage />} />
+      <Route path="/instant/ready" element={<InstantSiteReady />} />
+      <Route path="/launch" element={<LaunchOfferPage />} />
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/builder" element={<ProtectedRoute><BuilderPage /></ProtectedRoute>} />
       <Route path="/builder/:id" element={<ProtectedRoute><BuilderPage /></ProtectedRoute>} />

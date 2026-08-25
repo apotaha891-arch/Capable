@@ -7,7 +7,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-const SYSTEM_EMAIL = 'admin@capable.test';
+const SYSTEM_EMAIL = 'apotaha891@gmail.com';
 const SYSTEM_NAME = 'Capable Team';
 const img = id => `https://images.unsplash.com/${id}?auto=format&fit=crop&w=1200&q=70`;
 const thumb = id => `https://images.unsplash.com/${id}?auto=format&fit=crop&w=640&q=70`;

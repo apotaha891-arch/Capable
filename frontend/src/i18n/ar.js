@@ -148,6 +148,55 @@ const ar = {
   tryFree: 'جرّبه مجاناً',
   viewGallery: 'عرض المعرض',
 
+  // Landing — الموقع الفوري (بدون كتابة برومبت)
+  instantLabel: 'بدون كتابة برومبت',
+  instantSectionTitle: 'احصل على موقعك اليوم بسعر ثابت',
+  instantSectionSubtitle: 'اختر نوع الموقع، أضف اسمك ورقم واتساب، وادفع مرة واحدة — بدون كتابة أي وصف.',
+  instantGetStarted: 'ابدأ الآن',
+
+  // معالج الموقع الفوري
+  instantTitle: 'احصل على موقعك اليوم',
+  instantSubtitle: 'اختر النوع، أضف بياناتك، وادفع مرة واحدة — وسيكون موقعك جاهزاً مباشرة.',
+  instantSar: 'ريال',
+  instantSeeExample: 'شاهد مثالاً',
+  instantSiteNameLabel: 'ما اسم موقعك؟',
+  instantSiteNamePlaceholder: 'مثال: مطعم الواحة',
+  instantWhatsappLabel: 'رقم الواتساب الخاص بك',
+  instantWhatsappHint: 'سنضع هذا الرقم في موقعك ليتواصل معك عملاؤك مباشرة.',
+  instantBack: 'رجوع',
+  instantNext: 'التالي',
+  instantPayNow: 'ادفع وفعّل موقعك',
+  instantGenerating: 'جارٍ إنشاء موقعك الحقيقي بالذكاء الاصطناعي — قد يستغرق هذا حتى 20 ثانية.',
+  instantErrorGeneric: 'حدث خطأ ما، حاول مرة أخرى.',
+
+  instantStep1Heading: 'وش نوع المشروع اللي تبيه؟',
+  instantStep1Help: 'اختر الأقرب لفكرتك، وتقدر تعدّل التفاصيل بعدين.',
+  instantStep2Heading: 'خلّينا نتعرف على مشروعك',
+  instantStep3Heading: 'أي ستايل يعبّر عن مشروعك؟',
+  instantStep3Help: 'بنطبّقه على المعاينة الحية على طول.',
+  instantStep4Heading: 'جاهز؟ هذا شكل موقعك',
+  instantStep4Help: 'تقدر تغيّر أي شي بعدين — الحين خلّنا نطلقه.',
+
+  instantTier_simple_name: 'موقع بسيط',
+  instantTier_simple_desc: 'صفحة واحدة أنيقة لأي عمل: من نحن، خدماتنا، تواصل معنا.',
+  instantTier_store_name: 'متجر إلكتروني',
+  instantTier_store_desc: 'اعرض منتجاتك مع الأسعار وطريقة سهلة لاستقبال الطلبات.',
+  instantTier_booking_name: 'موقع مطعم أو حجوزات',
+  instantTier_booking_desc: 'قائمة طعام أو خدمات مع نموذج حجز مباشر.',
+  instantTier_marketplace_name: 'سوق إلكتروني',
+  instantTier_marketplace_desc: 'واجهة متجر متعددة الأقسام تناسب عدة بائعين أو عروض.',
+
+  // صفحة جاهزية الموقع الفوري
+  instantBuildingTitle: 'جارٍ تجهيز موقعك…',
+  instantBuildingDesc: 'تم تأكيد دفعتك — نقوم الآن بإنشاء موقعك بالذكاء الاصطناعي. قد يستغرق هذا حتى دقيقة واحدة.',
+  instantReadyTitle: 'موقعك جاهز الآن!',
+  instantReadyDesc: 'هذا موقعك الجديد. لقد تم تسجيل دخولك تلقائياً ويمكنك إدارته في أي وقت.',
+  instantViewSite: 'مشاهدة موقعي',
+  instantDownloadCode: 'تحميل الكود',
+  instantManageSite: 'إدارة من لوحة التحكم',
+  instantDelayedTitle: 'جارٍ تأكيد عملية الدفع',
+  instantDelayedDesc: 'هذا يستغرق وقتاً أطول من المعتاد قليلاً. إذا نجحت عملية الدفع، سيظهر موقعك في لوحة التحكم قريباً.',
+
   // Dashboard
   manageProjects: 'إدارة واجهاتك وتطبيقاتك المولّدة.',
   noProjects: 'لا توجد مشاريع بعد.',

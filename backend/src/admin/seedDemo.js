@@ -15,7 +15,7 @@ export async function seedDemoFinance(pool) {
 
   // Attribute demo rows to the system user if present.
   const { rows: u } = await pool.query(
-    `SELECT id FROM users ORDER BY (email = 'admin@capable.test') DESC, id ASC LIMIT 1`
+    `SELECT id FROM users ORDER BY (email = 'apotaha891@gmail.com') DESC, id ASC LIMIT 1`
   );
   const uid = u[0]?.id || null;
 

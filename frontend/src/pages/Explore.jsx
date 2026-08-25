@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Sparkles, Globe } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
@@ -18,6 +18,7 @@ export default function Explore() {
   const [activeCat, setActiveCat] = useState('all');
   const [preview, setPreview] = useState(null);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { t, lang } = useLang();
   const { user, authFetch } = useAuth();
 
@@ -27,6 +28,12 @@ export default function Explore() {
       .then(data => { setApiProjects(Array.isArray(data) ? data : []); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
+
+  // Deep link from the instant-site funnel, e.g. /explore?category=ecommerce
+  useEffect(() => {
+    const cat = searchParams.get('category');
+    if (cat) setActiveCat(cat);
+  }, [searchParams]);
 
   // Normalize the real projects served from the API.
   const projects = useMemo(() => apiProjects.map(p => ({
@@ -54,6 +61,16 @@ export default function Explore() {
   }, [projects, lang]);
 
   const visibleSections = activeCat === 'all' ? sections : sections.filter(s => s.id === activeCat);
+
+  // Category pills for the filter bar. Built from the static CATEGORIES list
+  // (not just the loaded `sections`) so a deep-linked category — e.g. from the
+  // instant-site funnel's "see example" link — shows as selected immediately,
+  // instead of only appearing once the (often multi-second) explore fetch resolves.
+  const pillCategories = useMemo(() => {
+    const ids = new Set(sections.map(s => s.id));
+    if (activeCat !== 'all' && CATEGORIES.some(c => c.id === activeCat)) ids.add(activeCat);
+    return CATEGORIES.filter(c => ids.has(c.id)).map(c => ({ id: c.id, label: categoryLabel(c.id, lang) }));
+  }, [sections, activeCat, lang]);
 
   // ── Actions ──────────────────────────────────────────────────────────────
   const requireAuth = () => {
@@ -122,13 +139,16 @@ export default function Explore() {
         {/* Field filter bar */}
         <div className="flex flex-wrap justify-center gap-2 mb-10">
           <FilterPill label={t('galleryAllFields')} active={activeCat === 'all'} onClick={() => setActiveCat('all')} />
-          {sections.map(s => (
+          {pillCategories.map(s => (
             <FilterPill key={s.id} label={s.label} active={activeCat === s.id} onClick={() => setActiveCat(s.id)} />
           ))}
         </div>
 
         {loading ? (
-          <div className="flex justify-center py-20">
+          <div className="flex flex-col items-center justify-center gap-4 py-20">
+            {activeCat !== 'all' && (
+              <p className="text-slate-400 text-sm">{categoryLabel(activeCat, lang)}</p>
+            )}
             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-400" />
           </div>
         ) : visibleSections.length === 0 ? (

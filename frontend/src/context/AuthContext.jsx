@@ -44,6 +44,15 @@ export function AuthProvider({ children }) {
     return data.user;
   };
 
+  // Hydrate auth state from a token minted elsewhere (e.g. the instant-site
+  // funnel's checkout/status endpoints, which mint a login token server-side
+  // once a guest's paid site goes live) — skips the credentials round-trip.
+  const loginWithToken = (newToken, newUser) => {
+    localStorage.setItem('capable_token', newToken);
+    setToken(newToken);
+    setUser(newUser);
+  };
+
   const logout = () => {
     localStorage.removeItem('capable_token');
     setToken(null);
@@ -68,7 +77,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout, authFetch }}>
+    <AuthContext.Provider value={{ user, token, loading, login, register, logout, authFetch, loginWithToken }}>
       {children}
     </AuthContext.Provider>
   );

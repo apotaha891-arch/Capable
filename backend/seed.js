@@ -9,7 +9,7 @@ const pool = new Pool({
 
 console.log('Seeding database with starter projects...');
 
-const SYSTEM_EMAIL = 'admin@capable.test';
+const SYSTEM_EMAIL = 'apotaha891@gmail.com';
 const SYSTEM_NAME = 'Capable Team';
 
 const projects = [

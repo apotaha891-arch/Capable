@@ -466,6 +466,42 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ───────────── INSTANT SITE FUNNEL ───────────── */}
+      <section className="relative z-10 bg-white dark:bg-transparent border-b border-gray-100 dark:border-slate-800/60">
+        <div className="max-w-6xl mx-auto px-6 md:px-8 py-20 md:py-24">
+          <div className="max-w-3xl mb-12">
+            <Reveal><SectionLabel><Rocket size={12} /> {t('instantLabel')}</SectionLabel></Reveal>
+            <Reveal delay={80}><h2 className="mt-4 mb-3">{t('instantSectionTitle')}</h2></Reveal>
+            <Reveal delay={140}>
+              <p className="text-capable-muted dark:text-slate-400 text-base md:text-lg leading-relaxed">{t('instantSectionSubtitle')}</p>
+            </Reveal>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-5">
+            {[
+              { key: 'simple', price: 50, category: 'portfolio' },
+              { key: 'store', price: 75, category: 'ecommerce' },
+              { key: 'booking', price: 75, category: 'food' },
+              { key: 'marketplace', price: 100, category: 'ecommerce' },
+            ].map((tier, i) => (
+              <Reveal key={tier.key} delay={i * 80}>
+                <Link
+                  to={`/instant?tier=${tier.key}`}
+                  className="group block brand-card p-6 h-full flex flex-col hover:border-capable-light dark:hover:border-indigo-500/50 hover:shadow-brand transition-all"
+                >
+                  <h3 className="text-base font-bold text-capable-navy dark:text-white mb-1">{t(`instantTier_${tier.key}_name`)}</h3>
+                  <p className="text-capable-navy dark:text-indigo-300 font-bold mb-3">{tier.price} {t('instantSar')}</p>
+                  <p className="text-sm text-capable-muted dark:text-slate-400 leading-relaxed mb-5 flex-1">{t(`instantTier_${tier.key}_desc`)}</p>
+                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-capable-navy dark:text-indigo-300 group-hover:gap-2.5 transition-all">
+                    {t('instantGetStarted')} {ArrowIcon}
+                  </span>
+                </Link>
+              </Reveal>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ───────────── COMPARISON ───────────── */}
       <section className="relative z-10 bg-white dark:bg-transparent border-b border-gray-100 dark:border-slate-800/60">
         <div className="max-w-6xl mx-auto px-6 md:px-8 py-20 md:py-24">

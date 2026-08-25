@@ -148,6 +148,55 @@ const en = {
   tryFree: 'Try it for free',
   viewGallery: 'View Gallery',
 
+  // Landing — Instant Site funnel promo
+  instantLabel: 'No prompt needed',
+  instantSectionTitle: 'Get a site live today, fixed price',
+  instantSectionSubtitle: "Pick a site type, add your name and WhatsApp number, and pay once — no prompt writing.",
+  instantGetStarted: 'Get started',
+
+  // Instant Site wizard
+  instantTitle: 'Get your site live today',
+  instantSubtitle: 'Pick a type, add your details, and pay once — your site goes live right after.',
+  instantSar: 'SAR',
+  instantSeeExample: 'See an example',
+  instantSiteNameLabel: 'What should we call your site?',
+  instantSiteNamePlaceholder: 'e.g. Al Waha Restaurant',
+  instantWhatsappLabel: 'Your WhatsApp number',
+  instantWhatsappHint: "We'll put this on your site so customers can reach you directly.",
+  instantBack: 'Back',
+  instantNext: 'Next',
+  instantPayNow: 'Pay & go live',
+  instantGenerating: "Generating your real site with AI — this can take up to 20 seconds.",
+  instantErrorGeneric: 'Something went wrong. Please try again.',
+
+  instantStep1Heading: 'What kind of project do you want?',
+  instantStep1Help: "Pick the closest match — you can adjust details next.",
+  instantStep2Heading: "Let's get to know your project",
+  instantStep3Heading: 'Which style fits your project?',
+  instantStep3Help: "We'll apply it to your live preview right away.",
+  instantStep4Heading: 'Ready? Here\'s your site',
+  instantStep4Help: 'You can change anything later — now let\'s launch it.',
+
+  instantTier_simple_name: 'Simple Website',
+  instantTier_simple_desc: 'A clean one-page site for any business — about, services, contact.',
+  instantTier_store_name: 'Online Store',
+  instantTier_store_desc: 'Showcase products with pricing and a way for customers to order.',
+  instantTier_booking_name: 'Restaurant / Booking Site',
+  instantTier_booking_desc: 'Menu or service list plus a reservation form.',
+  instantTier_marketplace_name: 'Marketplace',
+  instantTier_marketplace_desc: 'Multi-category storefront styled for several sellers or offerings.',
+
+  // Instant Site ready page
+  instantBuildingTitle: 'Building your site…',
+  instantBuildingDesc: "Your payment is confirmed — we're generating your site with AI now. This can take up to a minute.",
+  instantReadyTitle: 'Your site is live!',
+  instantReadyDesc: "Here's your new site. You're already signed in and can manage it anytime.",
+  instantViewSite: 'View my site',
+  instantDownloadCode: 'Download code',
+  instantManageSite: 'Manage in dashboard',
+  instantDelayedTitle: "Still confirming your payment",
+  instantDelayedDesc: "This is taking a little longer than usual. If your payment succeeded, your site will appear in your dashboard shortly.",
+
   // Dashboard
   manageProjects: 'Manage your generated interfaces and apps.',
   noProjects: 'No projects yet.',

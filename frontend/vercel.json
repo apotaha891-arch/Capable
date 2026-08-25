@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/(auth|explore|docs|instant|launch|dashboard|builder|editor|blueprint|project|influence|challenges|commitment|marketplace|admin)(/.*)?",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/:slug",
+      "destination": "https://api.capable.live/api/sites/:slug"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

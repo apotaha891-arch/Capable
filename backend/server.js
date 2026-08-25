@@ -15,6 +15,9 @@ import crypto from 'crypto';
 import dns from 'dns/promises';
 import { generateBlueprint, getFallbackBlueprint, GenerationError } from './src/blueprint/generate.js';
 import { BlueprintSchema } from './src/blueprint/schema.js';
+import { getTier, QUICK_SITE_TIER_KEYS } from './src/quickSite/tiers.js';
+import { finalizeQuickSiteBlueprint } from './src/quickSite/finalize.js';
+import { renderBlueprintToHtml } from './src/quickSite/renderHtml.js';
 import { activeProviderName } from './src/ai/provider.js';
 import { getUsage, secondsUntilMidnight, monthlyTokenBudget, getMonthlyTokens, getMonthlyTokenGrants, effectiveDeployLimit, customDomainLimit, domainBranded } from './src/limits.js';
 import { monthlySeries, currentMRR, forecast as buildForecast, cashPosition, recommendations as buildRecommendations } from './src/admin/finance.js';
@@ -25,7 +28,7 @@ dotenv.config();
 
 // Emails that should always be treated as platform admins (comma-separated).
 const ADMIN_EMAILS = new Set(
-  (process.env.ADMIN_EMAILS || 'admin@capable.test')
+  (process.env.ADMIN_EMAILS || 'apotaha891@gmail.com')
     .split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
 );
 const isAdminEmail = (email) => ADMIN_EMAILS.has(String(email || '').toLowerCase());
@@ -186,6 +189,12 @@ async function initDB() {
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS category TEXT;
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS name_ar TEXT;
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS name_en TEXT;
+
+      -- Instant-site funnel (fixed-price, no-prompt checkout): guest accounts
+      -- are keyed by WhatsApp number, and purchased projects are tagged by tier.
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone) WHERE phone IS NOT NULL;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS quick_site_tier TEXT;
 
       -- Financial ledger (admin finance panel)
       CREATE TABLE IF NOT EXISTS transactions (
@@ -533,7 +542,8 @@ app.use(express.json({ limit: '10mb' }));
 // custom-domain pages. Pro/enterprise serve unbranded.
 function injectCapableBadge(html) {
   if (typeof html !== 'string') return html;
-  const badge = `\n<a href="https://capable.app/?ref=badge" target="_blank" rel="noopener" style="position:fixed;bottom:12px;right:12px;z-index:2147483647;display:inline-flex;align-items:center;gap:6px;background:#0f172a;color:#fff;font:600 12px/1 system-ui,sans-serif;padding:8px 12px;border-radius:9999px;text-decoration:none;box-shadow:0 2px 10px rgba(0,0,0,.25)">⚡ Powered by Capable</a>\n`;
+  const badgeDomain = process.env.NEXT_PUBLIC_APP_DOMAIN || 'capable.app';
+  const badge = `\n<a href="https://${badgeDomain}/?ref=badge" target="_blank" rel="noopener" style="position:fixed;bottom:12px;right:12px;z-index:2147483647;display:inline-flex;align-items:center;gap:6px;background:#0f172a;color:#fff;font:600 12px/1 system-ui,sans-serif;padding:8px 12px;border-radius:9999px;text-decoration:none;box-shadow:0 2px 10px rgba(0,0,0,.25)">⚡ Powered by Capable</a>\n`;
   return html.includes('</body>') ? html.replace('</body>', badge + '</body>') : html + badge;
 }
 
@@ -941,6 +951,28 @@ app.get('/api/projects/preview/:id', async (req, res) => {
     const out = /<\/body>/i.test(html)
       ? html.replace(/<\/body>/i, `${badge}</body>`)
       : html + badge;
+    res.send(out);
+  } catch (err) {
+    res.status(500).send('Error');
+  }
+});
+
+// GET /api/sites/:slug — serves a published project's HTML by its public slug.
+// This is what capable.live/{slug} rewrites to (see frontend/vercel.json) — the
+// customer-facing published-site URL. Same content as /api/projects/preview/:id,
+// keyed by slug instead of id since the public URL never exposes the numeric id.
+app.get('/api/sites/:slug', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      'SELECT id, code FROM projects WHERE published_slug = $1 AND is_public = true AND is_published = true',
+      [req.params.slug]
+    );
+    if (rows.length === 0 || !rows[0].code) return res.status(404).send('Not found');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    const badge = capableEditBadge(rows[0].id);
+    const out = /<\/body>/i.test(rows[0].code)
+      ? rows[0].code.replace(/<\/body>/i, `${badge}</body>`)
+      : rows[0].code + badge;
     res.send(out);
   } catch (err) {
     res.status(500).send('Error');
@@ -1368,6 +1400,42 @@ async function handleStripeEvent(event) {
         if (wrote) {
           const { rows: ar } = await pool.query('SELECT * FROM licensed_assets WHERE id = $1', [obj.metadata.asset_id]);
           if (ar[0]) await fulfillMemeLicense(userId, ar[0], amount); // adopt + pay creator + influence
+        }
+      } else if (obj.mode === 'payment' && obj.metadata?.kind === 'quick_site') {
+        const projectId = parseInt(obj.metadata?.project_id || '', 10) || null;
+        if (!projectId) break;
+        const amount = (obj.amount_total || 0) / 100;
+        await recordStripeTransaction({
+          userId, type: 'quick_site_sale', amount,
+          description: `Instant site: ${obj.metadata.tier || 'unknown tier'}`, stripeRef: obj.id,
+        });
+        // Gated on blueprint being unset (not on the transaction dedup above) so
+        // a retried webhook delivery safely resumes generation if the first
+        // attempt never finished, but never regenerates a site that's already live.
+        const { rows: pr } = await pool.query('SELECT blueprint, published_slug FROM projects WHERE id = $1 AND user_id = $2', [projectId, userId]);
+        if (pr[0] && pr[0].blueprint === null) {
+          const { blueprint, usedAI, usage } = await finalizeQuickSiteBlueprint({
+            tierKey: obj.metadata.tier,
+            siteName: obj.metadata.site_name,
+            whatsapp: obj.metadata.whatsapp,
+            language: obj.metadata.language || 'ar',
+            styleKey: obj.metadata.style,
+            detail: obj.metadata.detail,
+          });
+          const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
+          const html = renderBlueprintToHtml(blueprint, { slug: pr[0].published_slug, baseUrl });
+          await pool.query(
+            'UPDATE projects SET blueprint = $1, code = $2, is_published = true, is_public = true, last_edited = NOW(), updated_at = NOW() WHERE id = $3',
+            [blueprint, html, projectId]
+          );
+          if (usedAI && usage) {
+            const total = (usage.tokens_in || 0) + (usage.tokens_out || 0);
+            await pool.query('UPDATE users SET tokens_used = tokens_used + $1 WHERE id = $2', [total, userId]);
+            await pool.query(
+              'INSERT INTO token_usage (user_id, project_id, tokens_in, tokens_out, model, action) VALUES ($1, $2, $3, $4, $5, $6)',
+              [userId, projectId, usage.tokens_in || 0, usage.tokens_out || 0, usage.model || 'unknown', 'quick_site_generate']
+            );
+          }
         }
       }
       break;
@@ -2055,11 +2123,23 @@ function slugify(input) {
     .slice(0, 40);
 }
 
+// Top-level path segments the frontend app itself owns (see frontend/src/App.jsx's
+// routes) plus infra paths — a published site's slug must never collide with one
+// of these, since sites are served at capable.live/{slug} on the same domain.
+const RESERVED_SLUGS = new Set([
+  'auth', 'explore', 'docs', 'instant', 'launch', 'dashboard', 'builder', 'editor',
+  'blueprint', 'project', 'influence', 'challenges', 'commitment', 'marketplace',
+  'admin', 'api', 'hosted', 'uploads', 'sites', 'static', 'assets',
+  'favicon.ico', 'robots.txt', 'sitemap.xml',
+]);
+
 async function uniqueSlug(base) {
-  const root = slugify(base) || 'site';
+  const slugified = slugify(base);
+  const root = (!slugified || RESERVED_SLUGS.has(slugified)) ? 'site' : slugified;
   for (let i = 0; i < 6; i++) {
     const suffix = i === 0 ? '' : `-${Math.random().toString(36).slice(2, 6)}`;
     const candidate = `${root}${suffix}`;
+    if (RESERVED_SLUGS.has(candidate)) continue;
     const { rows } = await pool.query('SELECT 1 FROM projects WHERE published_slug = $1 LIMIT 1', [candidate]);
     if (rows.length === 0) return candidate;
   }
@@ -2209,6 +2289,174 @@ app.get('/api/render/:slug', async (req, res) => {
     if (rows.length === 0) return res.status(404).json({ error: 'Not found' });
     res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
     res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INSTANT-SITE FUNNEL — fixed-price, no-prompt checkout (public, guest-first)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// POST /api/quick-site/checkout — pick a tier, name + WhatsApp number, pay.
+// Deliberately public (no authMiddleware) and independent of the free-tier
+// generation quota: this is a distinct paid action, not a free generation.
+app.post('/api/quick-site/checkout', async (req, res) => {
+  try {
+    const { tier, site_name, whatsapp, language = 'ar', style, detail } = req.body || {};
+    const tierObj = getTier(tier);
+    if (!tierObj) return res.status(400).json({ error: 'Invalid tier', allowed: QUICK_SITE_TIER_KEYS });
+
+    const siteName = String(site_name || '').trim();
+    if (!siteName || siteName.length > 120) {
+      return res.status(400).json({ error: 'site_name is required (max 120 chars)' });
+    }
+    const digits = String(whatsapp || '').replace(/\D/g, '');
+    if (digits.length < 8) return res.status(400).json({ error: 'A valid WhatsApp number is required' });
+
+    // Find or create a guest account keyed by phone. Real email/password login
+    // isn't needed for this funnel — the success page logs the user in with a
+    // minted JWT once the site is live.
+    let userRow;
+    const { rows: existing } = await pool.query('SELECT id, email, name, plan, role FROM users WHERE phone = $1', [digits]);
+    if (existing.length > 0) {
+      userRow = existing[0];
+    } else {
+      const placeholderEmail = `wa-${digits}@guest.capable.app`;
+      const hash = await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 10);
+      const { rows } = await pool.query(
+        `INSERT INTO users (email, name, password_hash, phone, plan, role)
+         VALUES ($1, $2, $3, $4, 'free', 'user') RETURNING id, email, name, plan, role`,
+        [placeholderEmail, siteName, hash, digits]
+      );
+      userRow = rows[0];
+    }
+
+    // The project row is created up front (with an assigned slug) so we have a
+    // stable project_id either way. Its blueprint is filled in below.
+    const slug = await uniqueSlug(siteName);
+    const { rows: projectRows } = await pool.query(
+      `INSERT INTO projects (user_id, name, published_slug, author, is_public, is_published, quick_site_tier, last_edited, updated_at)
+       VALUES ($1, $2, $3, $4, false, false, $5, NOW(), NOW()) RETURNING id`,
+      [userRow.id, siteName, slug, userRow.name, tierObj.key]
+    );
+    const projectId = projectRows[0].id;
+    // Customer-facing URL: https://<APP_DOMAIN>/<slug> — a path on the main site,
+    // proxied by frontend/vercel.json's rewrite to GET /api/sites/:slug (no
+    // wildcard DNS needed). Locally (no APP_DOMAIN configured) we fall back to
+    // hitting that same backend endpoint directly, since there's no Vercel
+    // rewrite to test against in dev.
+    const appDomain = process.env.NEXT_PUBLIC_APP_DOMAIN;
+    const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
+    const url = appDomain ? `https://${appDomain}/${slug}` : `${baseUrl}/api/sites/${slug}`;
+
+    if (!stripe) {
+      // Simulated/dev mode IS the payment — generate the real site now (AI,
+      // with the deterministic template as a fallback) and publish immediately.
+      const { blueprint, usedAI, usage } = await finalizeQuickSiteBlueprint({
+        tierKey: tierObj.key, siteName, whatsapp: digits, language, styleKey: style, detail,
+      });
+      const html = renderBlueprintToHtml(blueprint, { slug, baseUrl });
+      await pool.query(
+        'UPDATE projects SET blueprint = $1, code = $2, is_published = true, is_public = true, last_edited = NOW(), updated_at = NOW() WHERE id = $3',
+        [blueprint, html, projectId]
+      );
+      if (usedAI && usage) {
+        const total = (usage.tokens_in || 0) + (usage.tokens_out || 0);
+        await pool.query('UPDATE users SET tokens_used = tokens_used + $1 WHERE id = $2', [total, userRow.id]);
+        await pool.query(
+          'INSERT INTO token_usage (user_id, project_id, tokens_in, tokens_out, model, action) VALUES ($1, $2, $3, $4, $5, $6)',
+          [userRow.id, projectId, usage.tokens_in || 0, usage.tokens_out || 0, usage.model || 'unknown', 'quick_site_generate']
+        );
+      }
+      await pool.query(
+        'INSERT INTO transactions (user_id, type, amount, status, description, project_id) VALUES ($1, $2, $3, $4, $5, $6)',
+        [userRow.id, 'quick_site_sale', tierObj.priceSar, 'paid', `Instant site: ${tierObj.key} (simulated)`, projectId]
+      );
+      const token = jwt.sign(userRow, JWT_SECRET, { expiresIn: '30d' });
+      return res.json({ simulated: true, token, user: userRow, project_id: projectId, slug, url });
+    }
+
+    // Real payment: generation happens AFTER Stripe confirms (webhook), so we
+    // never spend AI generation on an abandoned checkout, and the link only
+    // ever goes live once the paid-for site is actually ready.
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: 'sar',
+          unit_amount: Math.round(tierObj.priceSar * 100),
+          product_data: { name: `${tierObj.nameEn} — ${siteName}` },
+        },
+      }],
+      client_reference_id: String(userRow.id),
+      metadata: {
+        user_id: String(userRow.id), project_id: String(projectId), kind: 'quick_site', tier: tierObj.key,
+        site_name: siteName, whatsapp: digits, language, style: style || '', detail: detail ? String(detail).slice(0, 200) : '',
+      },
+      success_url: `${FRONTEND_URL}/instant/ready?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${FRONTEND_URL}/instant?checkout=cancel`,
+    });
+    res.json({ url: session.url });
+  } catch (err) {
+    res.status(500).json({ error: 'Checkout failed', details: err.message });
+  }
+});
+
+// GET /api/quick-site/status — polled by the "ready" page after Stripe redirects
+// back. Once the webhook has published the project, mints a login token so the
+// guest lands already signed in.
+app.get('/api/quick-site/status', async (req, res) => {
+  try {
+    const sessionId = req.query.session_id;
+    if (!sessionId) return res.status(400).json({ error: 'session_id is required' });
+    if (!stripe) return res.status(503).json({ error: 'Stripe not configured' });
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const projectId = parseInt(session.metadata?.project_id || '', 10) || null;
+    const userId = parseInt(session.metadata?.user_id || '', 10) || null;
+    if (!projectId || !userId) return res.status(404).json({ error: 'Not found' });
+
+    const { rows } = await pool.query('SELECT id, published_slug, is_published FROM projects WHERE id = $1 AND user_id = $2', [projectId, userId]);
+    const project = rows[0];
+    if (!project || !project.is_published) return res.json({ ready: false });
+
+    const { rows: userRows } = await pool.query('SELECT id, email, name, plan, role FROM users WHERE id = $1', [userId]);
+    const user = userRows[0];
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const token = jwt.sign(user, JWT_SECRET, { expiresIn: '30d' });
+    const appDomain = process.env.NEXT_PUBLIC_APP_DOMAIN;
+    const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
+    const siteUrl = appDomain ? `https://${appDomain}/${project.published_slug}` : `${baseUrl}/api/sites/${project.published_slug}`;
+    res.json({
+      ready: true,
+      token,
+      user,
+      project: { id: project.id, slug: project.published_slug, url: siteUrl },
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// GET /api/quick-site/stats — real count of completed instant-site purchases,
+// optionally filtered by tier. Public, no PII. Backs the launch-offer landing
+// page's seat counter — this must only ever reflect confirmed (paid)
+// transactions, never a client-side or fabricated number.
+app.get('/api/quick-site/stats', async (req, res) => {
+  try {
+    const tier = QUICK_SITE_TIER_KEYS.includes(req.query.tier) ? req.query.tier : null;
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS n
+         FROM transactions t
+         JOIN projects p ON p.id = t.project_id
+        WHERE t.type = 'quick_site_sale' AND t.status = 'paid'
+          AND ($1::text IS NULL OR p.quick_site_tier = $1)`,
+      [tier]
+    );
+    res.json({ count: rows[0].n });
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
   }
