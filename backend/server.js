@@ -2331,6 +2331,13 @@ app.post('/api/quick-site/checkout', async (req, res) => {
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
+      // SAR needs an explicit payment_method_types — without it, Stripe tries
+      // to auto-select from whatever's enabled in the dashboard and 500s with
+      // "No valid payment method types for this Checkout Session" if none of
+      // those happen to support SAR settlement. Cards support SAR presentment
+      // (via Stripe's currency conversion) on every account, so this is safe
+      // regardless of what else is toggled on in the dashboard.
+      payment_method_types: ['card'],
       line_items: [{
         quantity: 1,
         price_data: {
