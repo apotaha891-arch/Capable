@@ -14,7 +14,7 @@ import { API_BASE as API } from '../utils/api.js';
 // never sends the customer off to the general Explore gallery, where they'd
 // be free to wander the rest of the site and lose the checkout intent.
 export default function InstantExamplesPage() {
-  const { t, isRTL, lang } = useLang();
+  const { t, isRTL } = useLang();
   const [searchParams] = useSearchParams();
   const focusTier = searchParams.get('tier');
   const refs = useRef({});
@@ -66,7 +66,7 @@ export default function InstantExamplesPage() {
                   <span className="w-2 h-2 rounded-full bg-gray-300 dark:bg-slate-600" />
                 </div>
                 <iframe
-                  src={`${API}/api/quick-site/example/${tr.key}?lang=${lang}`}
+                  src={`${API}/api/quick-site/example/${tr.key}`}
                   title={t(`instantTier_${tr.key}_name`)}
                   className="w-full h-[60vh] bg-white"
                   loading="lazy"

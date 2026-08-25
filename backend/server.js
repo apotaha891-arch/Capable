@@ -18,7 +18,6 @@ import { BlueprintSchema } from './src/blueprint/schema.js';
 import { getTier, QUICK_SITE_TIER_KEYS } from './src/quickSite/tiers.js';
 import { finalizeQuickSiteBlueprint } from './src/quickSite/finalize.js';
 import { renderBlueprintToHtml } from './src/quickSite/renderHtml.js';
-import { buildBlueprintForTier } from './src/quickSite/templates.js';
 import { activeProviderName } from './src/ai/provider.js';
 import { getUsage, secondsUntilMidnight, monthlyTokenBudget, getMonthlyTokens, getMonthlyTokenGrants, effectiveDeployLimit, customDomainLimit, domainBranded } from './src/limits.js';
 import { monthlySeries, currentMRR, forecast as buildForecast, cashPosition, recommendations as buildRecommendations } from './src/admin/finance.js';
@@ -2487,28 +2486,52 @@ app.get('/api/quick-site/stats', async (req, res) => {
   }
 });
 
-// GET /api/quick-site/example/:tier — a static, self-contained preview of what
-// each tier looks like, rendered from the same deterministic template used as
-// the AI-generation fallback (templates.js) — no DB read, can't fail, never
-// shows a real customer's project. Backs the in-funnel examples page so a
-// customer previewing a tier never has to leave the checkout flow and land in
-// the general Explore gallery, where they can wander off and lose the offer.
-app.get('/api/quick-site/example/:tier', (req, res) => {
-  const tierObj = getTier(req.params.tier);
-  if (!tierObj) return res.status(404).send('Not found');
-  const language = req.query.lang === 'en' ? 'en' : 'ar';
-  const isRtl = language === 'ar';
-  const blueprint = buildBlueprintForTier(tierObj.key, {
-    siteName: isRtl ? tierObj.nameAr : tierObj.nameEn,
-    whatsapp: '966500000000',
-    language,
-    styleKey: 'warm',
-    detail: undefined,
-  });
-  const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
-  const html = renderBlueprintToHtml(blueprint, { slug: `example-${tierObj.key}`, baseUrl });
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(html);
+// Real, polished gallery projects to show as each tier's example — named
+// picks first (curated for relevance and quality), category as a fallback if
+// a named one is ever renamed/removed. "store" and "marketplace" deliberately
+// don't share a pick even though both are loosely "ecommerce" categorized,
+// so the two tiers never show the exact same site.
+const TIER_EXAMPLE_PICKS = {
+  simple: ['Personal Portfolio', 'Photo Gallery'],
+  store: ['Noon Boutique'],
+  booking: ['Zaatar House', 'Shifa Clinic', 'PowerFit Gym'],
+  marketplace: ['Dar Realty', 'Horizon Travel', 'Layali Weddings'],
+};
+const TIER_EXAMPLE_CATEGORIES = {
+  simple: ['portfolio', 'saas'],
+  store: ['ecommerce'],
+  booking: ['food', 'health', 'fitness'],
+  marketplace: ['realestate', 'travel', 'events'],
+};
+
+// GET /api/quick-site/example/:tier — a real, complete published project
+// shown as a preview of what each tier looks like. Backs the in-funnel
+// examples page so a customer previewing a tier never has to leave the
+// checkout flow and land in the general Explore gallery, where they can
+// wander off and lose the offer.
+app.get('/api/quick-site/example/:tier', async (req, res) => {
+  try {
+    const tierObj = getTier(req.params.tier);
+    if (!tierObj) return res.status(404).send('Not found');
+
+    const names = TIER_EXAMPLE_PICKS[tierObj.key] || [];
+    const categories = TIER_EXAMPLE_CATEGORIES[tierObj.key] || [];
+    const { rows } = await pool.query(
+      `SELECT code FROM projects
+        WHERE is_public = true AND length(COALESCE(code, '')) > 0
+          AND (name_en = ANY($1::text[]) OR category = ANY($2::text[]))
+        ORDER BY
+          CASE WHEN name_en = ANY($1::text[]) THEN array_position($1::text[], name_en) ELSE 999 END,
+          featured DESC NULLS LAST, likes DESC
+        LIMIT 1`,
+      [names, categories]
+    );
+    if (rows.length === 0 || !rows[0].code) return res.status(404).send('No example available yet');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(rows[0].code);
+  } catch (err) {
+    res.status(500).send('Error');
+  }
 });
 
 // GET /api/blueprint/quota — current tier usage for the dashboard
