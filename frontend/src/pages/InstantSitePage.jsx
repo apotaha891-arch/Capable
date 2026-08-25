@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ExternalLink, Loader2, Lock, Rocket } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -119,14 +119,12 @@ export default function InstantSitePage() {
                         <div className="font-bold text-sm text-capable-navy dark:text-white mb-0.5">{t(`instantTier_${tr.key}_name`)}</div>
                         <div className="text-xs text-capable-muted dark:text-slate-500">{tr.priceSar} {t('instantSar')}</div>
                       </button>
-                      <a
-                        href={`/explore?category=${tr.exampleCategory}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <Link
+                        to={`/instant/examples?tier=${tr.key}`}
                         className="mt-3 inline-flex items-center gap-1 text-[11px] font-semibold text-capable-navy dark:text-indigo-300"
                       >
                         {t('instantSeeExample')} <ExternalLink size={11} />
-                      </a>
+                      </Link>
                     </div>
                   ))}
                 </div>

@@ -4,7 +4,7 @@ import { API_BASE as API } from '../utils/api.js';
 
 export const TIERS = [
   {
-    key: 'simple', icon: '📄', priceSar: 50, exampleCategory: 'portfolio',
+    key: 'simple', icon: '📄', priceSar: 50,
     question: { ar: 'ما الهدف الأساسي من الموقع؟', en: "What's the main goal of your site?" },
     options: {
       ar: ['عرض أعمالي', 'التعريف بخدماتي', 'معلومات تواصل'],
@@ -12,7 +12,7 @@ export const TIERS = [
     },
   },
   {
-    key: 'store', icon: '🛍️', priceSar: 75, exampleCategory: 'ecommerce',
+    key: 'store', icon: '🛍️', priceSar: 75,
     question: { ar: 'ماذا تبيع في متجرك؟', en: 'What do you sell in your store?' },
     options: {
       ar: ['ملابس وأزياء', 'إلكترونيات وتقنية', 'مستحضرات تجميل وعناية', 'منتجات منزلية'],
@@ -20,7 +20,7 @@ export const TIERS = [
     },
   },
   {
-    key: 'booking', icon: '📅', priceSar: 75, exampleCategory: 'food',
+    key: 'booking', icon: '📅', priceSar: 75,
     question: { ar: 'ما نوع نشاطك؟', en: 'What type of business is this?' },
     options: {
       ar: ['مطعم أو مقهى', 'عيادة أو صالون', 'حجوزات وخدمات عامة'],
@@ -28,7 +28,7 @@ export const TIERS = [
     },
   },
   {
-    key: 'marketplace', icon: '🏪', priceSar: 100, exampleCategory: 'ecommerce',
+    key: 'marketplace', icon: '🏪', priceSar: 100,
     question: { ar: 'ما نوع السوق الذي تريده؟', en: 'What kind of marketplace is this?' },
     options: {
       ar: ['منتجات يدوية وحرفية', 'أزياء ومنتجات متنوعة', 'خدمات ومستقلين'],

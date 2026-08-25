@@ -17,6 +17,7 @@ import ChallengesPage from './pages/ChallengesPage.jsx';
 import MarketplacePage from './pages/MarketplacePage.jsx';
 import DocsPage from './pages/DocsPage.jsx';
 import InstantSitePage from './pages/InstantSitePage.jsx';
+import InstantExamplesPage from './pages/InstantExamplesPage.jsx';
 import InstantSiteFinish from './pages/InstantSiteFinish.jsx';
 import InstantSiteReady from './pages/InstantSiteReady.jsx';
 import LaunchOfferPage from './pages/LaunchOfferPage.jsx';
@@ -53,6 +54,7 @@ function AppRoutes() {
       <Route path="/explore" element={<Explore />} />
       <Route path="/docs" element={<DocsPage />} />
       <Route path="/instant" element={<InstantSitePage />} />
+      <Route path="/instant/examples" element={<InstantExamplesPage />} />
       <Route path="/instant/finish" element={<InstantSiteFinish />} />
       <Route path="/instant/ready" element={<InstantSiteReady />} />
       <Route path="/launch" element={<LaunchOfferPage />} />

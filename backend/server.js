@@ -18,6 +18,7 @@ import { BlueprintSchema } from './src/blueprint/schema.js';
 import { getTier, QUICK_SITE_TIER_KEYS } from './src/quickSite/tiers.js';
 import { finalizeQuickSiteBlueprint } from './src/quickSite/finalize.js';
 import { renderBlueprintToHtml } from './src/quickSite/renderHtml.js';
+import { buildBlueprintForTier } from './src/quickSite/templates.js';
 import { activeProviderName } from './src/ai/provider.js';
 import { getUsage, secondsUntilMidnight, monthlyTokenBudget, getMonthlyTokens, getMonthlyTokenGrants, effectiveDeployLimit, customDomainLimit, domainBranded } from './src/limits.js';
 import { monthlySeries, currentMRR, forecast as buildForecast, cashPosition, recommendations as buildRecommendations } from './src/admin/finance.js';
@@ -2484,6 +2485,30 @@ app.get('/api/quick-site/stats', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
   }
+});
+
+// GET /api/quick-site/example/:tier — a static, self-contained preview of what
+// each tier looks like, rendered from the same deterministic template used as
+// the AI-generation fallback (templates.js) — no DB read, can't fail, never
+// shows a real customer's project. Backs the in-funnel examples page so a
+// customer previewing a tier never has to leave the checkout flow and land in
+// the general Explore gallery, where they can wander off and lose the offer.
+app.get('/api/quick-site/example/:tier', (req, res) => {
+  const tierObj = getTier(req.params.tier);
+  if (!tierObj) return res.status(404).send('Not found');
+  const language = req.query.lang === 'en' ? 'en' : 'ar';
+  const isRtl = language === 'ar';
+  const blueprint = buildBlueprintForTier(tierObj.key, {
+    siteName: isRtl ? tierObj.nameAr : tierObj.nameEn,
+    whatsapp: '966500000000',
+    language,
+    styleKey: 'warm',
+    detail: undefined,
+  });
+  const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
+  const html = renderBlueprintToHtml(blueprint, { slug: `example-${tierObj.key}`, baseUrl });
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(html);
 });
 
 // GET /api/blueprint/quota — current tier usage for the dashboard
