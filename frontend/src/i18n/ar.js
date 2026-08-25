@@ -163,7 +163,6 @@ const ar = {
   instantSiteNamePlaceholder: 'مثال: مطعم الواحة',
   instantWhatsappLabel: 'رقم الواتساب الخاص بك',
   instantWhatsappHint: 'سنضع هذا الرقم في موقعك ليتواصل معك عملاؤك مباشرة.',
-  instantPreviewCta: 'تواصل معنا',
   instantBack: 'رجوع',
   instantNext: 'التالي',
   instantPayNow: 'ادفع وفعّل موقعك',
@@ -172,11 +171,13 @@ const ar = {
 
   instantStep1Heading: 'وش نوع المشروع اللي تبيه؟',
   instantStep1Help: 'اختر الأقرب لفكرتك، وتقدر تعدّل التفاصيل بعدين.',
+  instantPaymentHeading: 'ادفع الآن لتفعيل موقعك',
+  instantPaymentHelp: 'أدخل رقم واتسابك وادفع — بعدها تكمّل تفاصيل موقعك.',
+  instantSecureNote: 'دفع آمن عبر Stripe — تقدر تعدّل تفاصيل موقعك (الاسم، الستايل، المحتوى) في أي وقت بعد التفعيل.',
   instantStep2Heading: 'خلّينا نتعرف على مشروعك',
   instantStep3Heading: 'أي ستايل يعبّر عن مشروعك؟',
-  instantStep3Help: 'بنطبّقه على المعاينة الحية على طول.',
-  instantStep4Heading: 'جاهز؟ هذا شكل موقعك',
-  instantStep4Help: 'تقدر تغيّر أي شي بعدين — الحين خلّنا نطلقه.',
+  instantCreateSite: 'أنشئ موقعي',
+  instantConfirmingPayment: 'جارٍ تأكيد عملية الدفع…',
 
   instantTier_simple_name: 'موقع بسيط',
   instantTier_simple_desc: 'صفحة واحدة أنيقة لأي عمل: من نحن، خدماتنا، تواصل معنا.',
@@ -188,15 +189,13 @@ const ar = {
   instantTier_marketplace_desc: 'واجهة متجر متعددة الأقسام تناسب عدة بائعين أو عروض.',
 
   // صفحة جاهزية الموقع الفوري
-  instantBuildingTitle: 'جارٍ تجهيز موقعك…',
-  instantBuildingDesc: 'تم تأكيد دفعتك — نقوم الآن بإنشاء موقعك بالذكاء الاصطناعي. قد يستغرق هذا حتى دقيقة واحدة.',
   instantReadyTitle: 'موقعك جاهز الآن!',
   instantReadyDesc: 'هذا موقعك الجديد. لقد تم تسجيل دخولك تلقائياً ويمكنك إدارته في أي وقت.',
   instantViewSite: 'مشاهدة موقعي',
   instantDownloadCode: 'تحميل الكود',
   instantManageSite: 'إدارة من لوحة التحكم',
-  instantDelayedTitle: 'جارٍ تأكيد عملية الدفع',
-  instantDelayedDesc: 'هذا يستغرق وقتاً أطول من المعتاد قليلاً. إذا نجحت عملية الدفع، سيظهر موقعك في لوحة التحكم قريباً.',
+  instantMissingResultTitle: 'موقعك في لوحة التحكم',
+  instantMissingResultDesc: 'دفعتك تمّت بنجاح. إذا لم يظهر موقعك هنا، تفقّد لوحة التحكم — سيكون موجوداً هناك.',
 
   // Dashboard
   manageProjects: 'إدارة واجهاتك وتطبيقاتك المولّدة.',

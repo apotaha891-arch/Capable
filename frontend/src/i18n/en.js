@@ -163,7 +163,6 @@ const en = {
   instantSiteNamePlaceholder: 'e.g. Al Waha Restaurant',
   instantWhatsappLabel: 'Your WhatsApp number',
   instantWhatsappHint: "We'll put this on your site so customers can reach you directly.",
-  instantPreviewCta: 'Contact us',
   instantBack: 'Back',
   instantNext: 'Next',
   instantPayNow: 'Pay & go live',
@@ -172,11 +171,13 @@ const en = {
 
   instantStep1Heading: 'What kind of project do you want?',
   instantStep1Help: "Pick the closest match — you can adjust details next.",
+  instantPaymentHeading: 'Pay now to activate your site',
+  instantPaymentHelp: "Enter your WhatsApp number and pay — you'll fill in the details right after.",
+  instantSecureNote: "Secure payment via Stripe — you can edit your site's name, style, and content anytime after it goes live.",
   instantStep2Heading: "Let's get to know your project",
   instantStep3Heading: 'Which style fits your project?',
-  instantStep3Help: "We'll apply it to your live preview right away.",
-  instantStep4Heading: 'Ready? Here\'s your site',
-  instantStep4Help: 'You can change anything later — now let\'s launch it.',
+  instantCreateSite: 'Create my site',
+  instantConfirmingPayment: 'Confirming your payment…',
 
   instantTier_simple_name: 'Simple Website',
   instantTier_simple_desc: 'A clean one-page site for any business — about, services, contact.',
@@ -188,15 +189,13 @@ const en = {
   instantTier_marketplace_desc: 'Multi-category storefront styled for several sellers or offerings.',
 
   // Instant Site ready page
-  instantBuildingTitle: 'Building your site…',
-  instantBuildingDesc: "Your payment is confirmed — we're generating your site with AI now. This can take up to a minute.",
   instantReadyTitle: 'Your site is live!',
   instantReadyDesc: "Here's your new site. You're already signed in and can manage it anytime.",
   instantViewSite: 'View my site',
   instantDownloadCode: 'Download code',
   instantManageSite: 'Manage in dashboard',
-  instantDelayedTitle: "Still confirming your payment",
-  instantDelayedDesc: "This is taking a little longer than usual. If your payment succeeded, your site will appear in your dashboard shortly.",
+  instantMissingResultTitle: 'Your site is in your dashboard',
+  instantMissingResultDesc: "Your payment went through. If your site doesn't show up here, check your dashboard — it'll be there.",
 
   // Dashboard
   manageProjects: 'Manage your generated interfaces and apps.',

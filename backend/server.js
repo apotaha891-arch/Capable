@@ -1258,15 +1258,15 @@ async function recordInfluence(userId, eventType, { target = null, weight, metad
 
 // Insert a ledger row keyed by a Stripe object id (idempotent — duplicate webhook
 // deliveries won't double-count). Returns true only when a new row is written.
-async function recordStripeTransaction({ userId, type, amount, status = 'paid', description, plan = null, stripeRef = null }) {
+async function recordStripeTransaction({ userId, type, amount, status = 'paid', description, plan = null, stripeRef = null, projectId = null }) {
   if (stripeRef) {
     const { rows } = await pool.query('SELECT 1 FROM transactions WHERE stripe_ref = $1 LIMIT 1', [stripeRef]);
     if (rows.length) return false;
   }
   await pool.query(
-    `INSERT INTO transactions (user_id, type, amount, status, description, plan, stripe_ref)
-     VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (stripe_ref) DO NOTHING`,
-    [userId, type, amount, status, description, plan, stripeRef]
+    `INSERT INTO transactions (user_id, type, amount, status, description, plan, stripe_ref, project_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (stripe_ref) DO NOTHING`,
+    [userId, type, amount, status, description, plan, stripeRef, projectId]
   );
   return true;
 }
@@ -1402,41 +1402,17 @@ async function handleStripeEvent(event) {
           if (ar[0]) await fulfillMemeLicense(userId, ar[0], amount); // adopt + pay creator + influence
         }
       } else if (obj.mode === 'payment' && obj.metadata?.kind === 'quick_site') {
+        // Payment now happens right after the customer picks a tier — before
+        // site name/style/detail are collected — so this webhook only records
+        // the sale. Generation happens later via the authenticated
+        // POST /api/quick-site/finalize call once those details come in, not
+        // here (there's nothing to generate from yet).
         const projectId = parseInt(obj.metadata?.project_id || '', 10) || null;
-        if (!projectId) break;
         const amount = (obj.amount_total || 0) / 100;
         await recordStripeTransaction({
-          userId, type: 'quick_site_sale', amount,
+          userId, type: 'quick_site_sale', amount, projectId,
           description: `Instant site: ${obj.metadata.tier || 'unknown tier'}`, stripeRef: obj.id,
         });
-        // Gated on blueprint being unset (not on the transaction dedup above) so
-        // a retried webhook delivery safely resumes generation if the first
-        // attempt never finished, but never regenerates a site that's already live.
-        const { rows: pr } = await pool.query('SELECT blueprint, published_slug FROM projects WHERE id = $1 AND user_id = $2', [projectId, userId]);
-        if (pr[0] && pr[0].blueprint === null) {
-          const { blueprint, usedAI, usage } = await finalizeQuickSiteBlueprint({
-            tierKey: obj.metadata.tier,
-            siteName: obj.metadata.site_name,
-            whatsapp: obj.metadata.whatsapp,
-            language: obj.metadata.language || 'ar',
-            styleKey: obj.metadata.style,
-            detail: obj.metadata.detail,
-          });
-          const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
-          const html = renderBlueprintToHtml(blueprint, { slug: pr[0].published_slug, baseUrl });
-          await pool.query(
-            'UPDATE projects SET blueprint = $1, code = $2, is_published = true, is_public = true, last_edited = NOW(), updated_at = NOW() WHERE id = $3',
-            [blueprint, html, projectId]
-          );
-          if (usedAI && usage) {
-            const total = (usage.tokens_in || 0) + (usage.tokens_out || 0);
-            await pool.query('UPDATE users SET tokens_used = tokens_used + $1 WHERE id = $2', [total, userId]);
-            await pool.query(
-              'INSERT INTO token_usage (user_id, project_id, tokens_in, tokens_out, model, action) VALUES ($1, $2, $3, $4, $5, $6)',
-              [userId, projectId, usage.tokens_in || 0, usage.tokens_out || 0, usage.model || 'unknown', 'quick_site_generate']
-            );
-          }
-        }
       }
       break;
     }
@@ -2298,25 +2274,24 @@ app.get('/api/render/:slug', async (req, res) => {
 // INSTANT-SITE FUNNEL — fixed-price, no-prompt checkout (public, guest-first)
 // ══════════════════════════════════════════════════════════════════════════════
 
-// POST /api/quick-site/checkout — pick a tier, name + WhatsApp number, pay.
+// POST /api/quick-site/checkout — pick a tier + WhatsApp number, pay immediately.
 // Deliberately public (no authMiddleware) and independent of the free-tier
 // generation quota: this is a distinct paid action, not a free generation.
+// Site name/style/detail are collected AFTER payment (see /finalize below) —
+// keeps the pre-payment form to one field, and guarantees an AI generation
+// call is never spent on an abandoned checkout.
 app.post('/api/quick-site/checkout', async (req, res) => {
   try {
-    const { tier, site_name, whatsapp, language = 'ar', style, detail } = req.body || {};
+    const { tier, whatsapp, language = 'ar' } = req.body || {};
     const tierObj = getTier(tier);
     if (!tierObj) return res.status(400).json({ error: 'Invalid tier', allowed: QUICK_SITE_TIER_KEYS });
 
-    const siteName = String(site_name || '').trim();
-    if (!siteName || siteName.length > 120) {
-      return res.status(400).json({ error: 'site_name is required (max 120 chars)' });
-    }
     const digits = String(whatsapp || '').replace(/\D/g, '');
     if (digits.length < 8) return res.status(400).json({ error: 'A valid WhatsApp number is required' });
 
     // Find or create a guest account keyed by phone. Real email/password login
-    // isn't needed for this funnel — the success page logs the user in with a
-    // minted JWT once the site is live.
+    // isn't needed for this funnel — /finalize logs the user in with a minted
+    // JWT once payment is confirmed.
     let userRow;
     const { rows: existing } = await pool.query('SELECT id, email, name, plan, role FROM users WHERE phone = $1', [digits]);
     if (existing.length > 0) {
@@ -2327,59 +2302,33 @@ app.post('/api/quick-site/checkout', async (req, res) => {
       const { rows } = await pool.query(
         `INSERT INTO users (email, name, password_hash, phone, plan, role)
          VALUES ($1, $2, $3, $4, 'free', 'user') RETURNING id, email, name, plan, role`,
-        [placeholderEmail, siteName, hash, digits]
+        [placeholderEmail, tierObj.nameEn, hash, digits]
       );
       userRow = rows[0];
     }
 
-    // The project row is created up front (with an assigned slug) so we have a
-    // stable project_id either way. Its blueprint is filled in below.
-    const slug = await uniqueSlug(siteName);
+    // Project row created up front (placeholder name/slug) so payment has
+    // something to attach to. /finalize fills in the real name, slug, and
+    // generated site once the customer supplies them post-payment.
+    const slug = await uniqueSlug(tierObj.key);
     const { rows: projectRows } = await pool.query(
       `INSERT INTO projects (user_id, name, published_slug, author, is_public, is_published, quick_site_tier, last_edited, updated_at)
        VALUES ($1, $2, $3, $4, false, false, $5, NOW(), NOW()) RETURNING id`,
-      [userRow.id, siteName, slug, userRow.name, tierObj.key]
+      [userRow.id, tierObj.nameEn, slug, userRow.name, tierObj.key]
     );
     const projectId = projectRows[0].id;
-    // Customer-facing URL: https://<APP_DOMAIN>/<slug> — a path on the main site,
-    // proxied by frontend/vercel.json's rewrite to GET /api/sites/:slug (no
-    // wildcard DNS needed). Locally (no APP_DOMAIN configured) we fall back to
-    // hitting that same backend endpoint directly, since there's no Vercel
-    // rewrite to test against in dev.
-    const appDomain = process.env.NEXT_PUBLIC_APP_DOMAIN;
-    const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
-    const url = appDomain ? `https://${appDomain}/${slug}` : `${baseUrl}/api/sites/${slug}`;
 
     if (!stripe) {
-      // Simulated/dev mode IS the payment — generate the real site now (AI,
-      // with the deterministic template as a fallback) and publish immediately.
-      const { blueprint, usedAI, usage } = await finalizeQuickSiteBlueprint({
-        tierKey: tierObj.key, siteName, whatsapp: digits, language, styleKey: style, detail,
-      });
-      const html = renderBlueprintToHtml(blueprint, { slug, baseUrl });
-      await pool.query(
-        'UPDATE projects SET blueprint = $1, code = $2, is_published = true, is_public = true, last_edited = NOW(), updated_at = NOW() WHERE id = $3',
-        [blueprint, html, projectId]
-      );
-      if (usedAI && usage) {
-        const total = (usage.tokens_in || 0) + (usage.tokens_out || 0);
-        await pool.query('UPDATE users SET tokens_used = tokens_used + $1 WHERE id = $2', [total, userRow.id]);
-        await pool.query(
-          'INSERT INTO token_usage (user_id, project_id, tokens_in, tokens_out, model, action) VALUES ($1, $2, $3, $4, $5, $6)',
-          [userRow.id, projectId, usage.tokens_in || 0, usage.tokens_out || 0, usage.model || 'unknown', 'quick_site_generate']
-        );
-      }
+      // Simulated/dev mode IS the payment — record the sale now; /finalize
+      // generates the actual site right after, in the same browser session.
       await pool.query(
         'INSERT INTO transactions (user_id, type, amount, status, description, project_id) VALUES ($1, $2, $3, $4, $5, $6)',
         [userRow.id, 'quick_site_sale', tierObj.priceSar, 'paid', `Instant site: ${tierObj.key} (simulated)`, projectId]
       );
       const token = jwt.sign(userRow, JWT_SECRET, { expiresIn: '30d' });
-      return res.json({ simulated: true, token, user: userRow, project_id: projectId, slug, url });
+      return res.json({ simulated: true, token, user: userRow, project_id: projectId, tier: tierObj.key });
     }
 
-    // Real payment: generation happens AFTER Stripe confirms (webhook), so we
-    // never spend AI generation on an abandoned checkout, and the link only
-    // ever goes live once the paid-for site is actually ready.
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       line_items: [{
@@ -2387,15 +2336,14 @@ app.post('/api/quick-site/checkout', async (req, res) => {
         price_data: {
           currency: 'sar',
           unit_amount: Math.round(tierObj.priceSar * 100),
-          product_data: { name: `${tierObj.nameEn} — ${siteName}` },
+          product_data: { name: tierObj.nameEn },
         },
       }],
       client_reference_id: String(userRow.id),
       metadata: {
-        user_id: String(userRow.id), project_id: String(projectId), kind: 'quick_site', tier: tierObj.key,
-        site_name: siteName, whatsapp: digits, language, style: style || '', detail: detail ? String(detail).slice(0, 200) : '',
+        user_id: String(userRow.id), project_id: String(projectId), kind: 'quick_site', tier: tierObj.key, language,
       },
-      success_url: `${FRONTEND_URL}/instant/ready?session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${FRONTEND_URL}/instant/finish?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${FRONTEND_URL}/instant?checkout=cancel`,
     });
     res.json({ url: session.url });
@@ -2404,10 +2352,11 @@ app.post('/api/quick-site/checkout', async (req, res) => {
   }
 });
 
-// GET /api/quick-site/status — polled by the "ready" page after Stripe redirects
-// back. Once the webhook has published the project, mints a login token so the
-// guest lands already signed in.
-app.get('/api/quick-site/status', async (req, res) => {
+// GET /api/quick-site/payment-status — polled by /instant/finish right after
+// Stripe redirects back, since the webhook that records the sale can lag the
+// redirect by a second or two. Once paid, mints a login token so the customer
+// moves straight into the authenticated /finalize step (site name + style).
+app.get('/api/quick-site/payment-status', async (req, res) => {
   try {
     const sessionId = req.query.session_id;
     if (!sessionId) return res.status(400).json({ error: 'session_id is required' });
@@ -2418,26 +2367,94 @@ app.get('/api/quick-site/status', async (req, res) => {
     const userId = parseInt(session.metadata?.user_id || '', 10) || null;
     if (!projectId || !userId) return res.status(404).json({ error: 'Not found' });
 
-    const { rows } = await pool.query('SELECT id, published_slug, is_published FROM projects WHERE id = $1 AND user_id = $2', [projectId, userId]);
-    const project = rows[0];
-    if (!project || !project.is_published) return res.json({ ready: false });
+    const { rows: txRows } = await pool.query(
+      `SELECT 1 FROM transactions WHERE project_id = $1 AND type = 'quick_site_sale' AND status = 'paid' LIMIT 1`,
+      [projectId]
+    );
+    if (txRows.length === 0) return res.json({ paid: false });
 
     const { rows: userRows } = await pool.query('SELECT id, email, name, plan, role FROM users WHERE id = $1', [userId]);
     const user = userRows[0];
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const token = jwt.sign(user, JWT_SECRET, { expiresIn: '30d' });
-    const appDomain = process.env.NEXT_PUBLIC_APP_DOMAIN;
-    const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
-    const siteUrl = appDomain ? `https://${appDomain}/${project.published_slug}` : `${baseUrl}/api/sites/${project.published_slug}`;
     res.json({
-      ready: true,
-      token,
-      user,
-      project: { id: project.id, slug: project.published_slug, url: siteUrl },
+      paid: true, token, user, project_id: projectId,
+      tier: session.metadata.tier, language: session.metadata.language || 'ar',
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// POST /api/quick-site/finalize — collects site name/style/detail AFTER
+// payment and generates + publishes the real site. Authenticated: the caller
+// must hold the token minted by checkout (simulated mode) or payment-status
+// (real Stripe mode), which only ever fires once payment is confirmed.
+app.post('/api/quick-site/finalize', authMiddleware, async (req, res) => {
+  try {
+    const { project_id, site_name, language = 'ar', style, detail } = req.body || {};
+    const projectId = parseInt(project_id, 10) || null;
+    if (!projectId) return res.status(400).json({ error: 'project_id is required' });
+
+    const siteName = String(site_name || '').trim();
+    if (!siteName || siteName.length > 120) {
+      return res.status(400).json({ error: 'site_name is required (max 120 chars)' });
+    }
+
+    const { rows: pr } = await pool.query(
+      'SELECT id, blueprint, published_slug, quick_site_tier FROM projects WHERE id = $1 AND user_id = $2',
+      [projectId, req.user.id]
+    );
+    const project = pr[0];
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const appDomain = process.env.NEXT_PUBLIC_APP_DOMAIN;
+    const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
+
+    // Idempotent: a double-submit (e.g. a retried click) returns the
+    // already-published site instead of regenerating it.
+    if (project.blueprint !== null) {
+      const url = appDomain ? `https://${appDomain}/${project.published_slug}` : `${baseUrl}/api/sites/${project.published_slug}`;
+      return res.json({ slug: project.published_slug, url });
+    }
+
+    const { rows: txRows } = await pool.query(
+      `SELECT 1 FROM transactions WHERE project_id = $1 AND type = 'quick_site_sale' AND status = 'paid' LIMIT 1`,
+      [projectId]
+    );
+    if (txRows.length === 0) return res.status(402).json({ error: 'Payment not confirmed for this project yet' });
+
+    const tierObj = getTier(project.quick_site_tier);
+    if (!tierObj) return res.status(400).json({ error: 'Unknown tier for this project' });
+
+    const { rows: userRows } = await pool.query('SELECT phone FROM users WHERE id = $1', [req.user.id]);
+    const whatsapp = userRows[0]?.phone || '';
+    const slug = await uniqueSlug(siteName);
+
+    const { blueprint, usedAI, usage } = await finalizeQuickSiteBlueprint({
+      tierKey: tierObj.key, siteName, whatsapp, language, styleKey: style, detail,
+    });
+    const html = renderBlueprintToHtml(blueprint, { slug, baseUrl });
+    await pool.query(
+      `UPDATE projects SET name = $1, published_slug = $2, blueprint = $3, code = $4,
+              is_published = true, is_public = true, last_edited = NOW(), updated_at = NOW()
+        WHERE id = $5`,
+      [siteName, slug, blueprint, html, projectId]
+    );
+    if (usedAI && usage) {
+      const total = (usage.tokens_in || 0) + (usage.tokens_out || 0);
+      await pool.query('UPDATE users SET tokens_used = tokens_used + $1 WHERE id = $2', [total, req.user.id]);
+      await pool.query(
+        'INSERT INTO token_usage (user_id, project_id, tokens_in, tokens_out, model, action) VALUES ($1, $2, $3, $4, $5, $6)',
+        [req.user.id, projectId, usage.tokens_in || 0, usage.tokens_out || 0, usage.model || 'unknown', 'quick_site_generate']
+      );
+    }
+
+    const url = appDomain ? `https://${appDomain}/${slug}` : `${baseUrl}/api/sites/${slug}`;
+    res.json({ slug, url });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to generate your site', details: err.message });
   }
 });
 

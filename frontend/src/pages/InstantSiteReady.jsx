@@ -1,28 +1,20 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Link, useLocation, useSearchParams } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { CheckCircle2, Download, ExternalLink, Loader2, MessageCircle } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
-import { useAuth } from '../context/AuthContext.jsx';
 import Logo from '../components/Logo.jsx';
-import { API_BASE as API } from '../utils/api.js';
-
-const POLL_INTERVAL_MS = 2000;
-// Generation now happens post-payment (real AI call in the Stripe webhook,
-// with a deterministic-template fallback), so this needs real headroom.
-const MAX_ATTEMPTS = 30; // ~60s
 
 export default function InstantSiteReady() {
   const { t } = useLang();
-  const { loginWithToken } = useAuth();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
-  const sessionId = searchParams.get('session_id');
-  const directResult = location.state; // { slug, url } — simulated-mode checkout already logged in
+  // { slug, url } — set by InstantSitePage (simulated checkout) or
+  // InstantSiteFinish (real Stripe checkout) once /finalize has actually
+  // generated and published the site. If it's missing (e.g. a page reload
+  // lost the router state), there's nothing left to poll for — the site
+  // itself already exists in the dashboard by the time this page is reached.
+  const result = location.state || null;
 
-  const [result, setResult] = useState(directResult || null);
-  const [timedOut, setTimedOut] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const attempts = useRef(0);
 
   const downloadCode = async () => {
     if (!result || downloading) return;
@@ -43,35 +35,6 @@ export default function InstantSiteReady() {
       setDownloading(false);
     }
   };
-
-  useEffect(() => {
-    if (result || !sessionId) return;
-    let cancelled = false;
-
-    const poll = async () => {
-      attempts.current += 1;
-      try {
-        const res = await fetch(`${API}/api/quick-site/status?session_id=${encodeURIComponent(sessionId)}`);
-        const data = await res.json();
-        if (cancelled) return;
-        if (data.ready) {
-          loginWithToken(data.token, data.user);
-          setResult({ slug: data.project.slug, url: data.project.url });
-          return;
-        }
-      } catch {
-        // transient — keep polling until MAX_ATTEMPTS
-      }
-      if (attempts.current >= MAX_ATTEMPTS) {
-        setTimedOut(true);
-        return;
-      }
-      setTimeout(poll, POLL_INTERVAL_MS);
-    };
-    poll();
-
-    return () => { cancelled = true; };
-  }, [result, sessionId, loginWithToken]);
 
   return (
     <div className="min-h-screen bg-white dark:bg-slate-950 flex flex-col">
@@ -136,21 +99,14 @@ export default function InstantSiteReady() {
           </div>
         ) : (
           <div className="max-w-md w-full text-center">
-            {timedOut ? (
-              <>
-                <div className="w-14 h-14 mx-auto mb-6 rounded-full bg-capable-warning/10 text-capable-warning flex items-center justify-center">
-                  <MessageCircle size={26} />
-                </div>
-                <h1 className="text-2xl font-bold text-capable-navy dark:text-white mb-2">{t('instantDelayedTitle')}</h1>
-                <p className="text-capable-muted dark:text-slate-400">{t('instantDelayedDesc')}</p>
-              </>
-            ) : (
-              <>
-                <Loader2 size={32} className="mx-auto mb-6 animate-spin text-capable-navy dark:text-indigo-400" />
-                <h1 className="text-2xl font-bold text-capable-navy dark:text-white mb-2">{t('instantBuildingTitle')}</h1>
-                <p className="text-capable-muted dark:text-slate-400">{t('instantBuildingDesc')}</p>
-              </>
-            )}
+            <div className="w-14 h-14 mx-auto mb-6 rounded-full bg-capable-warning/10 text-capable-warning flex items-center justify-center">
+              <MessageCircle size={26} />
+            </div>
+            <h1 className="text-2xl font-bold text-capable-navy dark:text-white mb-2">{t('instantMissingResultTitle')}</h1>
+            <p className="text-capable-muted dark:text-slate-400 mb-4">{t('instantMissingResultDesc')}</p>
+            <Link to="/dashboard" className="text-sm font-semibold text-capable-navy dark:text-indigo-300">
+              {t('instantManageSite')}
+            </Link>
           </div>
         )}
       </div>
