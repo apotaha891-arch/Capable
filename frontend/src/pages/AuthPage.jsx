@@ -126,6 +126,14 @@ export default function AuthPage() {
               </button>
             </div>
 
+            {mode === 'login' && (
+              <div className="text-end -mt-2">
+                <Link to="/forgot-password" className="text-xs text-indigo-400 hover:underline">
+                  {lang === 'ar' ? 'نسيت كلمة المرور؟' : 'Forgot password?'}
+                </Link>
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={loading}

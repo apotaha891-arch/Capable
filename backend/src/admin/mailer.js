@@ -21,6 +21,15 @@ async function realSend(/* { to, subject, html } */) {
   return false;
 }
 
+// Send a single transactional email (e.g. password reset). In simulated mode
+// (no SMTP configured) it logs the content to the console so the link/code is
+// still reachable during local development. Returns true on success.
+export async function sendMail({ to, subject, html }) {
+  if (mailMode() === 'smtp') return realSend({ to, subject, html });
+  console.log(`[mailer:simulated] To: ${to}\nSubject: ${subject}\n${html}`);
+  return true;
+}
+
 // Deliver one campaign to a list of recipients [{ id, email }]. In simulated
 // mode it marks everyone "sent" and randomly flips a realistic share to
 // "opened" so engagement metrics are demonstrable.

@@ -21,7 +21,7 @@ import { renderBlueprintToHtml } from './src/quickSite/renderHtml.js';
 import { activeProviderName } from './src/ai/provider.js';
 import { getUsage, secondsUntilMidnight, monthlyTokenBudget, getMonthlyTokens, getMonthlyTokenGrants, effectiveDeployLimit, customDomainLimit, domainBranded } from './src/limits.js';
 import { monthlySeries, currentMRR, forecast as buildForecast, cashPosition, recommendations as buildRecommendations } from './src/admin/finance.js';
-import { deliverCampaign, mailMode } from './src/admin/mailer.js';
+import { deliverCampaign, mailMode, sendMail } from './src/admin/mailer.js';
 import { seedDemoFinance } from './src/admin/seedDemo.js';
 
 dotenv.config();
@@ -434,6 +434,10 @@ async function initDB() {
       ALTER TABLE token_grants        ENABLE ROW LEVEL SECURITY;
       ALTER TABLE adaptive_fund       ENABLE ROW LEVEL SECURITY;
       ALTER TABLE training_samples    ENABLE ROW LEVEL SECURITY;
+
+      -- Forgot-password flow: single-use, hashed, short-lived reset token.
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_hash TEXT;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMP;
     `);
 
     // Promote configured admin emails (no-op for emails not yet registered).
@@ -865,6 +869,63 @@ app.post('/api/auth/login', async (req, res) => {
     res.json({ token, user: payload });
   } catch (err) {
     res.status(500).json({ error: 'Login failed', details: err.message });
+  }
+});
+
+// POST /api/auth/forgot-password
+// Always responds with a generic success message, whether or not the email
+// is registered, so this endpoint can't be used to enumerate accounts.
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email is required' });
+
+  try {
+    const { rows } = await pool.query('SELECT id, name FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+    const user = rows[0];
+    if (user) {
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+      const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+      await pool.query(
+        'UPDATE users SET reset_token_hash = $1, reset_token_expires = $2 WHERE id = $3',
+        [tokenHash, expires, user.id]
+      );
+      const resetUrl = `${FRONTEND_URL}/reset-password?token=${rawToken}`;
+      await sendMail({
+        to: email,
+        subject: 'Reset your Capable password',
+        html: `<p>Hi ${user.name || ''},</p><p>Click the link below to reset your password. This link expires in 1 hour.</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>If you didn't request this, you can ignore this email.</p>`,
+      });
+    }
+    res.json({ message: 'If that email is registered, a reset link has been sent.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to process request', details: err.message });
+  }
+});
+
+// POST /api/auth/reset-password
+app.post('/api/auth/reset-password', async (req, res) => {
+  const { token, password } = req.body;
+  if (!token || !password) return res.status(400).json({ error: 'Token and new password are required' });
+  if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+
+  try {
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const { rows } = await pool.query(
+      'SELECT id FROM users WHERE reset_token_hash = $1 AND reset_token_expires > NOW()',
+      [tokenHash]
+    );
+    const user = rows[0];
+    if (!user) return res.status(400).json({ error: 'Invalid or expired reset link' });
+
+    const hash = await bcrypt.hash(password, 10);
+    await pool.query(
+      'UPDATE users SET password_hash = $1, reset_token_hash = NULL, reset_token_expires = NULL WHERE id = $2',
+      [hash, user.id]
+    );
+    res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to reset password', details: err.message });
   }
 });
 

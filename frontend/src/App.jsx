@@ -5,6 +5,8 @@ import { LangProvider } from './i18n/LangContext.jsx';
 import { ThemeProvider } from './theme/ThemeContext.jsx';
 import LandingPage from './pages/LandingPage.jsx';
 import AuthPage from './pages/AuthPage.jsx';
+import ForgotPasswordPage from './pages/ForgotPasswordPage.jsx';
+import ResetPasswordPage from './pages/ResetPasswordPage.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Explore from './pages/Explore.jsx';
 import Editor from './pages/Editor.jsx';
@@ -51,6 +53,8 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/auth" element={<AuthPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/explore" element={<Explore />} />
       <Route path="/docs" element={<DocsPage />} />
       <Route path="/instant" element={<InstantSitePage />} />
