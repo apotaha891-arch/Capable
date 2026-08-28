@@ -12,23 +12,47 @@ const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
 const ANTHROPIC_MODEL = process.env.SONNET_MODEL || process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
 
-async function callGroq({ system, user, temperature = 0.7 }) {
-  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: GROQ_MODEL,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      response_format: { type: 'json_object' },
-      temperature,
-    }),
+// A stalled provider call must never block the escalation ladder indefinitely —
+// race it against a hard deadline so a hung call fails fast and the caller
+// (generateBlueprint's rung loop) can escalate to the next provider instead of
+// leaving the request spinning for minutes.
+const CALL_TIMEOUT_MS = parseInt(process.env.AI_CALL_TIMEOUT_MS || '45000', 10);
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
   });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function callGroq({ system, user, temperature = 0.7 }) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        response_format: { type: 'json_object' },
+        temperature,
+      }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error(`Groq API timed out after ${CALL_TIMEOUT_MS}ms`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) {
     const body = await res.text();
@@ -60,7 +84,7 @@ async function callGemini({ system, user, temperature = 0.7 }) {
       maxOutputTokens: parseInt(process.env.MAX_OUTPUT_TOKENS || '8192', 10),
     },
   });
-  const result = await model.generateContent(user);
+  const result = await withTimeout(model.generateContent(user), CALL_TIMEOUT_MS, 'Gemini');
   const response = await result.response;
   return {
     text: response.text(),
@@ -84,7 +108,7 @@ async function callAnthropic({ system, user, temperature = 0.7 }) {
     system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: user }],
   });
-  const response = await stream.finalMessage();
+  const response = await withTimeout(stream.finalMessage(), CALL_TIMEOUT_MS, 'Anthropic');
   const text = response.content.filter(b => b.type === 'text').map(b => b.text).join('').trim();
   const u = response.usage || {};
   return {

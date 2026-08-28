@@ -3033,6 +3033,19 @@ app.post('/api/generate', authMiddleware, async (req, res) => {
 // The reviewer's output is tiny (a verdict), so putting a strong model there is
 // cheap relative to having it emit a full site.
 
+// A stalled provider call (network hang, dead upstream) must never block the
+// reliability ladder indefinitely — race it against a hard deadline so the
+// caller's escalation logic can move to the next rung instead of hanging for
+// minutes with nothing to show the user.
+const AI_CALL_TIMEOUT_MS = parseInt(process.env.AI_CALL_TIMEOUT_MS || '45000', 10);
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 // Parse the Builder's { message, code, title, type } JSON out of a raw model string.
 function parseBuilderPayload(raw) {
   const text = (raw || '').trim();
@@ -3063,7 +3076,7 @@ async function geminiBuild(system, messages, extra) {
       responseMimeType: 'application/json',
     },
   });
-  const result = await chat.sendMessage(prompt);
+  const result = await withTimeout(chat.sendMessage(prompt), AI_CALL_TIMEOUT_MS, 'Gemini generate');
   const response = await result.response;
   const u = response.usageMetadata || {};
   return {
@@ -3087,7 +3100,7 @@ async function anthropicBuild(anthropic, system, messages, model, extra) {
     system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
     messages: msgs,
   });
-  const response = await stream.finalMessage();
+  const response = await withTimeout(stream.finalMessage(), AI_CALL_TIMEOUT_MS, 'Anthropic generate');
   const raw = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   const u = response.usage || {};
   const tokensIn = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
@@ -3097,17 +3110,28 @@ async function anthropicBuild(anthropic, system, messages, model, extra) {
 // Call any OpenAI-compatible chat endpoint (DeepSeek, OpenRouter, Together, vLLM…).
 // Returns the assistant text + token usage. Uses Node's global fetch.
 async function openaiCompatChat({ model, system, messages, json }) {
-  const res = await fetch(`${OSS_BASE_URL.replace(/\/$/, '')}/v1/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OSS_API_KEY}` },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'system', content: system }, ...messages],
-      max_tokens: parseInt(process.env.BUILDER_MAX_OUTPUT_TOKENS || '32768'),
-      temperature: parseFloat(process.env.TEMPERATURE || '0.7'),
-      ...(json ? { response_format: { type: 'json_object' } } : {}),
-    }),
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AI_CALL_TIMEOUT_MS);
+  let res;
+  try {
+    res = await fetch(`${OSS_BASE_URL.replace(/\/$/, '')}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OSS_API_KEY}` },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'system', content: system }, ...messages],
+        max_tokens: parseInt(process.env.BUILDER_MAX_OUTPUT_TOKENS || '32768'),
+        temperature: parseFloat(process.env.TEMPERATURE || '0.7'),
+        ...(json ? { response_format: { type: 'json_object' } } : {}),
+      }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error(`OSS provider timed out after ${AI_CALL_TIMEOUT_MS}ms`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) throw new Error(`OSS provider ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const data = await res.json();
   const u = data.usage || {};
@@ -3151,7 +3175,7 @@ Flag only real problems: broken/empty links and anchors, buttons or forms that d
     system: [{ type: 'text', text: reviewSystem, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: `USER REQUEST:\n${userRequest}\n\nGENERATED HTML:\n${code}` }],
   });
-  const response = await stream.finalMessage();
+  const response = await withTimeout(stream.finalMessage(), AI_CALL_TIMEOUT_MS, 'Reviewer');
   const raw = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   const verdict = parseBuilderPayload(raw) ||
     (() => { try { return JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || ''); } catch { return null; } })() ||
@@ -3394,7 +3418,15 @@ app.post('/api/ai/generate', authMiddleware, async (req, res) => {
     let parsed = null, reviewIssues = null, wasRevised = false;
     let escalated = false, finalModel = null, lastIssues = '';
 
+    // Wall-clock budget for the whole ladder. Each provider call already has its
+    // own per-call timeout (AI_CALL_TIMEOUT_MS), but a slow-not-hung chain across
+    // several rungs could otherwise still run for minutes — bail to the instant
+    // fallback once the budget's spent instead of grinding through every rung.
+    const builderDeadlineMs = parseInt(process.env.BUILDER_DEADLINE_MS || '100000', 10);
+    const buildStartedAt = Date.now();
+
     for (let rung = 0; rung < ladder.length; rung++) {
+      if (Date.now() - buildStartedAt > builderDeadlineMs) break;
       const generator = ladder[rung];
       if (rung > 0) escalated = true;
 
@@ -3402,7 +3434,17 @@ app.post('/api/ai/generate', authMiddleware, async (req, res) => {
       const extra = lastIssues
         ? `A previous attempt had these problems. Produce a COMPLETE single-file site in the exact JSON format that fixes them:\n${lastIssues}`
         : undefined;
-      let attempt = await generateSite(anthropic, generator, system, messages, extra);
+      // A provider call failing outright (timeout, rate limit, network error)
+      // must escalate like any other failure, not abort the whole request —
+      // that's the entire point of having a reliability ladder.
+      let attempt;
+      try {
+        attempt = await generateSite(anthropic, generator, system, messages, extra);
+      } catch (err) {
+        console.error(`Builder generate failed on rung ${rung} (${generator.model}):`, err.message);
+        lastIssues = `A previous generator failed (${err.message}).`;
+        continue;
+      }
       logStep(generator.model, `generate:${tier}:rung${rung}`, attempt.usage);
       let code = attempt.payload?.code;
 
@@ -3412,7 +3454,15 @@ app.post('/api/ai/generate', authMiddleware, async (req, res) => {
       if (!struct.ok) { lastIssues = struct.issues; continue; }
 
       if (reviewEnabled) {
-        const { verdict, usage: reviewUsage } = await reviewSite(anthropic, tierCfg.reviewer.model, userRequest, code);
+        let verdict, reviewUsage;
+        try {
+          ({ verdict, usage: reviewUsage } = await reviewSite(anthropic, tierCfg.reviewer.model, userRequest, code));
+        } catch (err) {
+          // Reviewer being unavailable shouldn't block shipping an otherwise
+          // structurally-valid site — ship it unreviewed rather than fail outright.
+          console.error(`Builder review failed on rung ${rung}:`, err.message);
+          parsed = attempt.payload; finalModel = generator.model; break;
+        }
         logStep(tierCfg.reviewer.model, `review:${tier}:rung${rung}`, reviewUsage);
 
         if (verdict && verdict.approved === false && verdict.issues) {
@@ -3420,11 +3470,24 @@ app.post('/api/ai/generate', authMiddleware, async (req, res) => {
           // One in-place revise with the same generator, then re-check.
           const priorTurn = { role: 'assistant', content: JSON.stringify({ message: attempt.payload.message, code }) };
           const reviseExtra = `A senior reviewer found these issues. Return the COMPLETE corrected single-file site in the exact same JSON format, fixing ONLY these issues:\n${verdict.issues}`;
-          const revised = await generateSite(anthropic, generator, system, [...messages, priorTurn], reviseExtra);
+          let revised;
+          try {
+            revised = await generateSite(anthropic, generator, system, [...messages, priorTurn], reviseExtra);
+          } catch (err) {
+            console.error(`Builder revise failed on rung ${rung}:`, err.message);
+            lastIssues = verdict.issues;
+            continue;
+          }
           logStep(generator.model, `revise:${tier}:rung${rung}`, revised.usage);
 
           if (revised.payload?.code && validateSiteCode(revised.payload.code).ok) {
-            const recheck = await reviewSite(anthropic, tierCfg.reviewer.model, userRequest, revised.payload.code);
+            let recheck;
+            try {
+              recheck = await reviewSite(anthropic, tierCfg.reviewer.model, userRequest, revised.payload.code);
+            } catch (err) {
+              console.error(`Builder recheck failed on rung ${rung}:`, err.message);
+              parsed = revised.payload; finalModel = generator.model; wasRevised = true; break;
+            }
             logStep(tierCfg.reviewer.model, `recheck:${tier}:rung${rung}`, recheck.usage);
             wasRevised = true;
             if (!recheck.verdict || recheck.verdict.approved !== false) { parsed = revised.payload; finalModel = generator.model; break; }
