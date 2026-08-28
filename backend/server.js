@@ -3764,6 +3764,52 @@ app.get('/api/admin/overview', authMiddleware, adminMiddleware, async (req, res)
   }
 });
 
+// GET /api/admin/traffic — platform-wide visitor & engagement counts (page
+// views + form leads across every published site), for the admin dashboard.
+app.get('/api/admin/traffic', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const days = 14;
+    const [series, totals, today, thisMonth, refs, devices, leadsTotal, leadsThisMonth, sitesWithTraffic] = await Promise.all([
+      pool.query(
+        `SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS d, COUNT(*)::int AS c
+           FROM page_events WHERE type = 'view'
+            AND created_at >= now() - ($1::int - 1) * interval '1 day'
+          GROUP BY 1`, [days]),
+      pool.query(`SELECT COUNT(*)::int AS c FROM page_events WHERE type = 'view'`),
+      pool.query(`SELECT COUNT(*)::int AS c FROM page_events WHERE type = 'view' AND created_at >= date_trunc('day', now())`),
+      pool.query(`SELECT COUNT(*)::int AS c FROM page_events WHERE type = 'view' AND created_at >= date_trunc('month', now())`),
+      pool.query(`SELECT COALESCE(NULLIF(referrer,''),'Direct') AS r, COUNT(*)::int AS c
+                    FROM page_events WHERE type = 'view' GROUP BY 1 ORDER BY c DESC LIMIT 5`),
+      pool.query(`SELECT device, COUNT(*)::int AS c FROM page_events WHERE type = 'view' GROUP BY 1`),
+      pool.query(`SELECT COUNT(*)::int AS c FROM leads`),
+      pool.query(`SELECT COUNT(*)::int AS c FROM leads WHERE created_at >= date_trunc('month', now())`),
+      pool.query(`SELECT COUNT(DISTINCT project_id)::int AS c FROM page_events WHERE type = 'view'`),
+    ]);
+
+    const byDay = Object.fromEntries(series.rows.map(r => [r.d, r.c]));
+    const out = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const dt = new Date(); dt.setDate(dt.getDate() - i);
+      const key = dt.toISOString().slice(0, 10);
+      out.push({ date: key, label: `${dt.getDate()}/${dt.getMonth() + 1}`, views: byDay[key] || 0 });
+    }
+
+    res.json({
+      totalViews: totals.rows[0].c,
+      viewsToday: today.rows[0].c,
+      viewsThisMonth: thisMonth.rows[0].c,
+      series: out,
+      byReferrer: refs.rows,
+      byDevice: devices.rows,
+      leadsTotal: leadsTotal.rows[0].c,
+      leadsThisMonth: leadsThisMonth.rows[0].c,
+      sitesWithTraffic: sitesWithTraffic.rows[0].c,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
 // GET /api/admin/users — all users with project counts
 app.get('/api/admin/users', authMiddleware, adminMiddleware, async (req, res) => {
   try {
