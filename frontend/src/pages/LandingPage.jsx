@@ -246,7 +246,7 @@ function PricingSection({ t, isRTL }) {
                 <p className="text-sm text-capable-muted dark:text-slate-400">{t('planConsultDesc')}</p>
               </div>
             </div>
-            <a href="mailto:hello@capable.app?subject=Expert%20Help%20Request" className="shrink-0 bg-capable-navy/90 dark:bg-purple-700 hover:bg-capable-navy dark:hover:bg-purple-600 text-white py-2.5 px-5 rounded-brand text-sm font-semibold text-center transition-colors">
+            <a href="mailto:websitecapable@gmail.com?subject=Expert%20Help%20Request" className="shrink-0 bg-capable-navy/90 dark:bg-purple-700 hover:bg-capable-navy dark:hover:bg-purple-600 text-white py-2.5 px-5 rounded-brand text-sm font-semibold text-center transition-colors">
               {t('planConsultBadge')}
             </a>
           </div>

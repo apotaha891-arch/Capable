@@ -587,7 +587,7 @@ export default function Editor() {
             <span className="text-xs text-indigo-300 ml-2">{t('growthSignalDesc')}</span>
           </div>
           <a
-            href="mailto:hello@capable.app?subject=Expert%20Help%20Request"
+            href="mailto:websitecapable@gmail.com?subject=Expert%20Help%20Request"
             className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1 whitespace-nowrap transition-colors"
           >
             {t('growthSignalCta')} <ChevronRight size={12} />

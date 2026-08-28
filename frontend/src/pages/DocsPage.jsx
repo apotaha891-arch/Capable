@@ -468,7 +468,7 @@ export default function DocsPage() {
 
               <div className="mt-10 pt-5 border-t border-gray-200 dark:border-slate-800 flex items-center justify-between text-sm">
                 <Link to="/builder" className="btn-primary text-sm py-2 px-4">{L(lang, 'Start building', 'ابدأ البناء')}</Link>
-                <a href="mailto:support@capable.app" className="text-capable-muted dark:text-slate-400 hover:text-capable-navy dark:hover:text-white">
+                <a href="mailto:websitecapable@gmail.com" className="text-capable-muted dark:text-slate-400 hover:text-capable-navy dark:hover:text-white">
                   {L(lang, 'Still stuck? Contact support', 'ما زلت عالقاً؟ تواصل مع الدعم')}
                 </a>
               </div>

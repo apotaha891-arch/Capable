@@ -79,7 +79,7 @@ function ConsultingCard({ lang, t }) {
       </div>
       <p className="text-xs text-slate-400 mb-3 leading-relaxed">{t('consultDesc')}</p>
       <a
-        href="mailto:hello@capable.app?subject=Expert%20Help%20Request"
+        href="mailto:websitecapable@gmail.com?subject=Expert%20Help%20Request"
         className="w-full bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg py-2 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
       >
         {t('consultCta')} <ChevronRight size={12} />
