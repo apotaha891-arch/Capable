@@ -3036,8 +3036,12 @@ app.post('/api/generate', authMiddleware, async (req, res) => {
 // A stalled provider call (network hang, dead upstream) must never block the
 // reliability ladder indefinitely — race it against a hard deadline so the
 // caller's escalation logic can move to the next rung instead of hanging for
-// minutes with nothing to show the user.
-const AI_CALL_TIMEOUT_MS = parseInt(process.env.AI_CALL_TIMEOUT_MS || '45000', 10);
+// minutes with nothing to show the user. Generation needs a much longer budget
+// than review: a full single-file site can run up to BUILDER_MAX_OUTPUT_TOKENS
+// (32768 by default), which routinely takes over a minute, while the reviewer
+// only ever emits a small { approved, issues } verdict.
+const AI_GENERATE_TIMEOUT_MS = parseInt(process.env.AI_GENERATE_TIMEOUT_MS || '100000', 10);
+const AI_REVIEW_TIMEOUT_MS = parseInt(process.env.AI_REVIEW_TIMEOUT_MS || '30000', 10);
 function withTimeout(promise, ms, label) {
   let timer;
   const timeout = new Promise((_, reject) => {
@@ -3076,7 +3080,7 @@ async function geminiBuild(system, messages, extra) {
       responseMimeType: 'application/json',
     },
   });
-  const result = await withTimeout(chat.sendMessage(prompt), AI_CALL_TIMEOUT_MS, 'Gemini generate');
+  const result = await withTimeout(chat.sendMessage(prompt), AI_GENERATE_TIMEOUT_MS, 'Gemini generate');
   const response = await result.response;
   const u = response.usageMetadata || {};
   return {
@@ -3100,7 +3104,7 @@ async function anthropicBuild(anthropic, system, messages, model, extra) {
     system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
     messages: msgs,
   });
-  const response = await withTimeout(stream.finalMessage(), AI_CALL_TIMEOUT_MS, 'Anthropic generate');
+  const response = await withTimeout(stream.finalMessage(), AI_GENERATE_TIMEOUT_MS, 'Anthropic generate');
   const raw = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   const u = response.usage || {};
   const tokensIn = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
@@ -3111,7 +3115,7 @@ async function anthropicBuild(anthropic, system, messages, model, extra) {
 // Returns the assistant text + token usage. Uses Node's global fetch.
 async function openaiCompatChat({ model, system, messages, json }) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), AI_CALL_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), AI_GENERATE_TIMEOUT_MS);
   let res;
   try {
     res = await fetch(`${OSS_BASE_URL.replace(/\/$/, '')}/v1/chat/completions`, {
@@ -3127,7 +3131,7 @@ async function openaiCompatChat({ model, system, messages, json }) {
       signal: controller.signal,
     });
   } catch (err) {
-    if (err.name === 'AbortError') throw new Error(`OSS provider timed out after ${AI_CALL_TIMEOUT_MS}ms`);
+    if (err.name === 'AbortError') throw new Error(`OSS provider timed out after ${AI_GENERATE_TIMEOUT_MS}ms`);
     throw err;
   } finally {
     clearTimeout(timer);
@@ -3175,7 +3179,7 @@ Flag only real problems: broken/empty links and anchors, buttons or forms that d
     system: [{ type: 'text', text: reviewSystem, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: `USER REQUEST:\n${userRequest}\n\nGENERATED HTML:\n${code}` }],
   });
-  const response = await withTimeout(stream.finalMessage(), AI_CALL_TIMEOUT_MS, 'Reviewer');
+  const response = await withTimeout(stream.finalMessage(), AI_REVIEW_TIMEOUT_MS, 'Reviewer');
   const raw = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   const verdict = parseBuilderPayload(raw) ||
     (() => { try { return JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || ''); } catch { return null; } })() ||
@@ -3418,11 +3422,13 @@ app.post('/api/ai/generate', authMiddleware, async (req, res) => {
     let parsed = null, reviewIssues = null, wasRevised = false;
     let escalated = false, finalModel = null, lastIssues = '';
 
-    // Wall-clock budget for the whole ladder. Each provider call already has its
-    // own per-call timeout (AI_CALL_TIMEOUT_MS), but a slow-not-hung chain across
-    // several rungs could otherwise still run for minutes — bail to the instant
-    // fallback once the budget's spent instead of grinding through every rung.
-    const builderDeadlineMs = parseInt(process.env.BUILDER_DEADLINE_MS || '100000', 10);
+    // Wall-clock budget for the whole ladder. One rung can legitimately need
+    // generate + review + revise + recheck (up to ~100s+30s+100s+30s), so this
+    // has to comfortably clear a single rung with a revision — it's a safety
+    // net against a pathological multi-rung compounding chain, not a routine
+    // limiter. Bail to the instant fallback once the budget's spent instead of
+    // leaving the user waiting indefinitely.
+    const builderDeadlineMs = parseInt(process.env.BUILDER_DEADLINE_MS || '300000', 10);
     const buildStartedAt = Date.now();
 
     for (let rung = 0; rung < ladder.length; rung++) {

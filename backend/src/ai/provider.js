@@ -15,8 +15,10 @@ const ANTHROPIC_MODEL = process.env.SONNET_MODEL || process.env.ANTHROPIC_MODEL 
 // A stalled provider call must never block the escalation ladder indefinitely —
 // race it against a hard deadline so a hung call fails fast and the caller
 // (generateBlueprint's rung loop) can escalate to the next provider instead of
-// leaving the request spinning for minutes.
-const CALL_TIMEOUT_MS = parseInt(process.env.AI_CALL_TIMEOUT_MS || '45000', 10);
+// leaving the request spinning for minutes. Generating a full blueprint is a
+// large-output call, so this needs the same generous budget as the builder
+// pipeline's site generation, not a "quick call" timeout.
+const CALL_TIMEOUT_MS = parseInt(process.env.AI_GENERATE_TIMEOUT_MS || '100000', 10);
 function withTimeout(promise, ms, label) {
   let timer;
   const timeout = new Promise((_, reject) => {
