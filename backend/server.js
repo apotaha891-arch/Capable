@@ -3407,6 +3407,12 @@ app.post('/api/ai/generate', authMiddleware, async (req, res) => {
     const logStep = (model, action, usage) => usageLog.push({ model, action, ...usage });
     const userRequest = asText(messages[messages.length - 1].content);
 
+    // Step timing — logged (not just accumulated) so a slow generation can be
+    // diagnosed from Railway logs alone: which rung, which step, which model,
+    // how long. Grep for "[builder-timing]".
+    const logTiming = (rung, step, model, ms) =>
+      console.log(`[builder-timing] rung=${rung} step=${step} model=${model} ms=${ms}`);
+
     // Generator ladder: the tier's own generator first, then Sonnet, then Opus.
     // De-duped by model so we never retry the identical model; anthropic rungs are
     // skipped when no key is configured.
@@ -3444,9 +3450,12 @@ app.post('/api/ai/generate', authMiddleware, async (req, res) => {
       // must escalate like any other failure, not abort the whole request —
       // that's the entire point of having a reliability ladder.
       let attempt;
+      let stepStart = Date.now();
       try {
         attempt = await generateSite(anthropic, generator, system, messages, extra);
+        logTiming(rung, 'generate', generator.model, Date.now() - stepStart);
       } catch (err) {
+        logTiming(rung, 'generate_failed', generator.model, Date.now() - stepStart);
         console.error(`Builder generate failed on rung ${rung} (${generator.model}):`, err.message);
         lastIssues = `A previous generator failed (${err.message}).`;
         continue;
@@ -3461,9 +3470,12 @@ app.post('/api/ai/generate', authMiddleware, async (req, res) => {
 
       if (reviewEnabled) {
         let verdict, reviewUsage;
+        stepStart = Date.now();
         try {
           ({ verdict, usage: reviewUsage } = await reviewSite(anthropic, tierCfg.reviewer.model, userRequest, code));
+          logTiming(rung, 'review', tierCfg.reviewer.model, Date.now() - stepStart);
         } catch (err) {
+          logTiming(rung, 'review_failed', tierCfg.reviewer.model, Date.now() - stepStart);
           // Reviewer being unavailable shouldn't block shipping an otherwise
           // structurally-valid site — ship it unreviewed rather than fail outright.
           console.error(`Builder review failed on rung ${rung}:`, err.message);
@@ -3477,9 +3489,12 @@ app.post('/api/ai/generate', authMiddleware, async (req, res) => {
           const priorTurn = { role: 'assistant', content: JSON.stringify({ message: attempt.payload.message, code }) };
           const reviseExtra = `A senior reviewer found these issues. Return the COMPLETE corrected single-file site in the exact same JSON format, fixing ONLY these issues:\n${verdict.issues}`;
           let revised;
+          stepStart = Date.now();
           try {
             revised = await generateSite(anthropic, generator, system, [...messages, priorTurn], reviseExtra);
+            logTiming(rung, 'revise', generator.model, Date.now() - stepStart);
           } catch (err) {
+            logTiming(rung, 'revise_failed', generator.model, Date.now() - stepStart);
             console.error(`Builder revise failed on rung ${rung}:`, err.message);
             lastIssues = verdict.issues;
             continue;
@@ -3488,9 +3503,12 @@ app.post('/api/ai/generate', authMiddleware, async (req, res) => {
 
           if (revised.payload?.code && validateSiteCode(revised.payload.code).ok) {
             let recheck;
+            stepStart = Date.now();
             try {
               recheck = await reviewSite(anthropic, tierCfg.reviewer.model, userRequest, revised.payload.code);
+              logTiming(rung, 'recheck', tierCfg.reviewer.model, Date.now() - stepStart);
             } catch (err) {
+              logTiming(rung, 'recheck_failed', tierCfg.reviewer.model, Date.now() - stepStart);
               console.error(`Builder recheck failed on rung ${rung}:`, err.message);
               parsed = revised.payload; finalModel = generator.model; wasRevised = true; break;
             }
@@ -3516,6 +3534,7 @@ app.post('/api/ai/generate', authMiddleware, async (req, res) => {
       finalModel = 'fallback';
       parsed = { message: 'We generated a starting draft you can refine.', code: fallbackSite(userRequest), title: 'Draft', type: 'site' };
     }
+    console.log(`[builder-timing] TOTAL tier=${tier} ms=${Date.now() - buildStartedAt} escalated=${escalated} fallback=${fallbackUsed} final_model=${finalModel}`);
 
     // Soft upsell whisper: a reason code the client localizes (ar/en). Surfaces the
     // stronger engines only when relevant, without nagging.
