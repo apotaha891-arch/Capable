@@ -9,7 +9,7 @@ import { useLang } from '../i18n/LangContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
 import { StatCard, Spinner, LineChart, tt } from '../admin/AdminShared.jsx';
-import { siteUrl } from '../utils/site.js';
+import { siteUrl, NAMECHEAP_AFFILIATE_URL } from '../utils/site.js';
 import { hostedUrl } from '../utils/api.js';
 
 export default function ProjectPanel() {
@@ -464,6 +464,15 @@ function SettingsTab({ project, lang, authFetch, reload, t }) {
             ? tt(lang, 'Point your domain’s DNS to Capable, then verify from the editor.', 'وجّه DNS للدومين إلى Capable ثم فعّله من المحرّر.')
             : tt(lang, 'Connect your own domain (e.g. yourstore.com) on a higher plan.', 'اربط دومينك الخاص (مثل yourstore.com) عند الترقية لباقة أعلى.')}
         </p>
+        {canPremium && !form.custom_domain && (
+          <a
+            href={NAMECHEAP_AFFILIATE_URL} target="_blank" rel="noreferrer"
+            className="mt-1.5 inline-flex items-center gap-1.5 text-[11px] font-medium text-indigo-400 hover:underline"
+          >
+            <Globe size={11} />
+            {tt(lang, "Don't have a domain? Buy one via Namecheap", 'ليس لديك نطاق؟ اشترِ واحداً عبر Namecheap')}
+          </a>
+        )}
       </div>
 
       <div className="flex items-center gap-3">

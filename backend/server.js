@@ -434,6 +434,11 @@ async function initDB() {
       ALTER TABLE token_grants        ENABLE ROW LEVEL SECURITY;
       ALTER TABLE adaptive_fund       ENABLE ROW LEVEL SECURITY;
       ALTER TABLE training_samples    ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE commitments         ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE licensed_assets     ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE assistant_messages  ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE assistant_leads     ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE platform_reviews    ENABLE ROW LEVEL SECURITY;
 
       -- Forgot-password flow: single-use, hashed, short-lived reset token.
       ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_hash TEXT;

@@ -9,6 +9,13 @@ export function siteUrl(slug) {
   return APP_DOMAIN ? `https://${slug}.${APP_DOMAIN}` : `${LOCAL_RENDERER}/${slug}`;
 }
 
+// Namecheap affiliate link shown where users connect a custom domain but don't
+// own one yet. Set VITE_NAMECHEAP_AFFILIATE_URL once the affiliate account is
+// approved; falls back to a plain (non-affiliate) domain search so the CTA
+// never links nowhere.
+export const NAMECHEAP_AFFILIATE_URL =
+  import.meta.env.VITE_NAMECHEAP_AFFILIATE_URL || 'https://www.namecheap.com/domains/domain-name-search/';
+
 // These take the already-resolved public URL (hosted for code projects, renderer
 // for blueprints) — the caller picks the right one. Passing a slug here would
 // wrongly force the renderer form for code projects, which live at /hosted/….

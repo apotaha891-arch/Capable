@@ -7,6 +7,7 @@ import LangToggle from '../components/LangToggle.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
 import Logo from '../components/Logo.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
+import { NAMECHEAP_AFFILIATE_URL } from '../utils/site.js';
 
 // Model tiers (same engine as the Builder). Higher tiers cost more but review harder.
 const EDITOR_TIERS = [
@@ -78,6 +79,7 @@ export default function Editor() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
+  const [showUpgradeCta, setShowUpgradeCta] = useState(false);
   const [success, setSuccess] = useState('');
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(true);
@@ -278,6 +280,7 @@ export default function Editor() {
 
     setLoading(true);
     setError('');
+    setShowUpgradeCta(false);
     const startTime = Date.now();
 
     try {
@@ -290,11 +293,13 @@ export default function Editor() {
         const err = await response.json().catch(() => ({}));
         if (err.error === 'tier_limit_reached') {
           if (err.can_downgrade) setTier('capable1');
+          setShowUpgradeCta(true);
           throw new Error(isRTL
             ? `انتهى حد موديل ${err.tier} (الأعلى جودة يستهلك أكثر). تم الرجوع للموديل الأقل — أو رقِّ باقتك للاستمرار عليه.`
             : `${err.tier} limit reached (higher quality costs more). Switched you to the cheaper model — or upgrade to keep using it.`);
         }
         if (err.upgrade_required) {
+          setShowUpgradeCta(true);
           throw new Error(isRTL ? `نفدت توكناتك الشهرية (${err.tokens_used}/${err.tokens_limit}). الرجاء الترقية.` : `Monthly token limit reached (${err.tokens_used}/${err.tokens_limit}). Please upgrade.`);
         }
         throw new Error(err.details || `Server error ${response.status}`);
@@ -398,11 +403,21 @@ export default function Editor() {
         }
         setSuccess(t('projectSaved'));
       }
+      return true;
     } catch (err) {
       setError(`${t('failedSave')}: ${err.message}`);
+      return false;
     } finally {
       setSaving(false);
     }
+  };
+
+  /* ── upgrade ── save current work first so an interrupted/failed checkout
+     (e.g. Stripe redirect that doesn't complete) can never wipe an in-progress
+     project — the editor unmounts on navigation and holds no other persistence. */
+  const handleUpgrade = async () => {
+    const ok = await handleSave();
+    if (ok) navigate('/influence');
   };
 
   /* ── domain verification ─────────────────────────── */
@@ -569,6 +584,15 @@ export default function Editor() {
       {error && (
         <div className="flex items-center gap-2 bg-red-900/50 border-b border-red-700 px-4 py-2 text-red-300 text-sm shrink-0">
           <AlertCircle size={14} />{error}
+          {showUpgradeCta && (
+            <button
+              onClick={handleUpgrade}
+              disabled={saving}
+              className="ml-2 shrink-0 inline-flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 text-white px-3 py-1 rounded-lg text-xs font-semibold"
+            >
+              <Zap size={12} /> {saving ? (isRTL ? 'جارٍ الحفظ…' : 'Saving…') : (isRTL ? 'الترقية' : 'Upgrade')}
+            </button>
+          )}
           <button onClick={() => setError('')} className="ml-auto text-red-400 hover:text-white">✕</button>
         </div>
       )}
@@ -805,9 +829,9 @@ export default function Editor() {
                             <p className="text-sm text-slate-300 mb-3">
                               {t('lang') === 'ar' ? 'النطاقات المخصصة متاحة في الباقات المدفوعة. باقة Influence تشمل نطاقاً واحداً.' : 'Custom domains are a paid feature. The Influence plan includes one.'}
                             </p>
-                            <Link to="/influence" className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-semibold">
-                              <Zap size={14} /> {t('lang') === 'ar' ? 'الترقية' : 'Upgrade'}
-                            </Link>
+                            <button onClick={handleUpgrade} disabled={saving} className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+                              <Zap size={14} /> {saving ? (t('lang') === 'ar' ? 'جارٍ الحفظ…' : 'Saving…') : (t('lang') === 'ar' ? 'الترقية' : 'Upgrade')}
+                            </button>
                           </div>
                         ) : (
                         <>
@@ -838,9 +862,18 @@ export default function Editor() {
                         </div>
 
                         {!customDomain && (
-                          <p className="text-xs text-slate-500">
-                            {t('lang') === 'ar' ? 'أدخل نطاقك أعلاه وسنُعطيك إعدادات DNS اللازمة.' : 'Enter your domain above and we will give you the DNS records to set.'}
-                          </p>
+                          <>
+                            <p className="text-xs text-slate-500 mb-2">
+                              {t('lang') === 'ar' ? 'أدخل نطاقك أعلاه وسنُعطيك إعدادات DNS اللازمة.' : 'Enter your domain above and we will give you the DNS records to set.'}
+                            </p>
+                            <a
+                              href={NAMECHEAP_AFFILIATE_URL} target="_blank" rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-500 dark:text-indigo-300 hover:underline"
+                            >
+                              <Globe size={12} />
+                              {t('lang') === 'ar' ? 'ليس لديك نطاق؟ اشترِ واحداً عبر Namecheap' : "Don't have a domain? Buy one via Namecheap"}
+                            </a>
+                          </>
                         )}
 
                         {/* DNS instructions */}

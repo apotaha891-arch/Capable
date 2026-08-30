@@ -44,24 +44,30 @@ export default function InfluencePage() {
     else if (c === 'cancel') setMessage(ar ? 'تم إلغاء الدفع. لم يتم خصم أي مبلغ.' : 'Checkout canceled. No charge was made.');
   }, [ar]);
 
-  const subscribe = async () => {
+  const [subscribingPlan, setSubscribingPlan] = useState(null);
+
+  const subscribe = async (plan) => {
     if (!user) return;
     setLoading(true);
+    setSubscribingPlan(plan);
     setMessage('');
     try {
       const res = await authFetch('/api/biz/subscribe', {
         method: 'POST',
-        body: JSON.stringify({ plan: 'influence' }),
+        body: JSON.stringify({ plan }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || (ar ? 'تعذّر الاشتراك' : 'Failed to subscribe'));
       if (data.url) { window.location.href = data.url; return; } // Stripe Checkout
-      setMessage(ar ? 'باقة التأثير مفعّلة — أصبح لديك وصول تحكّم للميزات المميزة الجديدة.' : 'Your Influence Pass is active — you now have control access to new premium features.');
+      setMessage(plan === 'pro'
+        ? (ar ? 'باقة Pro مفعّلة — أصبح لديك وصول كامل للميزات الاحترافية.' : 'Your Pro plan is active — you now have full access to professional features.')
+        : (ar ? 'باقة التأثير مفعّلة — أصبح لديك وصول تحكّم للميزات المميزة الجديدة.' : 'Your Influence Pass is active — you now have control access to new premium features.'));
       loadResonance();
     } catch (err) {
       setMessage(err.message);
     } finally {
       setLoading(false);
+      setSubscribingPlan(null);
     }
   };
 
@@ -174,11 +180,14 @@ export default function InfluencePage() {
                 </button>
               )}
               <button
-                onClick={subscribe}
-                disabled={loading || user?.plan === 'influence'}
+                onClick={() => subscribe('influence')}
+                disabled={loading || user?.plan === 'influence' || user?.plan === 'pro'}
                 className="inline-flex items-center justify-center rounded-2xl bg-indigo-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:bg-slate-700"
               >
-                {user?.plan === 'influence' ? (ar ? 'باقة التأثير مفعّلة' : 'Influence Pass active') : (ar ? 'فعّل باقة التأثير' : 'Activate Influence Pass')}
+                {loading && subscribingPlan === 'influence' ? (ar ? 'جارٍ التحويل…' : 'Redirecting…')
+                  : user?.plan === 'influence' ? (ar ? 'باقة التأثير مفعّلة' : 'Influence Pass active')
+                  : user?.plan === 'pro' ? (ar ? 'باقة Pro مفعّلة لديك' : 'You already have Pro')
+                  : (ar ? 'فعّل باقة التأثير' : 'Activate Influence Pass')}
               </button>
             </div>
           </div>
@@ -188,6 +197,43 @@ export default function InfluencePage() {
               {message}
             </div>
           )}
+        </div>
+
+        <div className="mt-6 bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-lg shadow-slate-900/20">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full bg-emerald-500/10 px-4 py-2 text-sm font-semibold text-emerald-300">
+                <Zap size={16} /> {ar ? 'باقة Pro' : 'Pro plan'}
+              </div>
+              <h2 className="mt-4 text-2xl font-bold text-white">{ar ? 'أطلق كامل قوة كيبابل' : 'Unlock the full power of Capable'}</h2>
+              <p className="mt-3 text-slate-400 max-w-2xl leading-relaxed">
+                {ar
+                  ? 'مشاريع غير محدودة تقريباً، نطاقات مخصصة بلا حد، بدون شعار "Powered by Capable"، ووصول كامل لأعلى مستويات الجودة في المولّد (مثل Capable 2 وCapable 3).'
+                  : 'Near-unlimited projects, unlimited custom domains, no “Powered by Capable” badge, and full access to the highest-quality generation tiers (Capable 2 and Capable 3).'}
+              </p>
+            </div>
+            <div className="rounded-3xl bg-slate-800 border border-slate-700 p-6 w-full lg:w-auto text-center lg:text-start">
+              <div className="text-xs uppercase tracking-[0.3em] text-slate-500">{ar ? 'السعر الشهري' : 'Monthly price'}</div>
+              <div className="mt-2 text-3xl font-bold text-white">
+                ${pricing?.plans?.pro?.price ?? 49}
+                {pricing?.discount_pct > 0 && pricing.plans?.pro?.price !== pricing.plans?.pro?.base && (
+                  <span className="ms-2 text-base font-normal text-slate-500 line-through">${pricing.plans.pro.base}</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-8 flex justify-end">
+            {user?.plan !== 'pro' && (
+              <button
+                onClick={() => subscribe('pro')}
+                disabled={loading}
+                className="inline-flex items-center justify-center rounded-2xl bg-emerald-500 px-6 py-3 text-sm font-semibold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-slate-700"
+              >
+                {loading && subscribingPlan === 'pro' ? (ar ? 'جارٍ التحويل…' : 'Redirecting…') : (ar ? 'الترقية إلى Pro' : 'Upgrade to Pro')}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
