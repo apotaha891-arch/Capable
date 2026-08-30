@@ -22,6 +22,8 @@ import { activeProviderName } from './src/ai/provider.js';
 import { getUsage, secondsUntilMidnight, monthlyTokenBudget, getMonthlyTokens, getMonthlyTokenGrants, effectiveDeployLimit, customDomainLimit, domainBranded } from './src/limits.js';
 import { monthlySeries, currentMRR, forecast as buildForecast, cashPosition, recommendations as buildRecommendations } from './src/admin/finance.js';
 import { deliverCampaign, mailMode, sendMail } from './src/admin/mailer.js';
+import * as domainRegistrar from './src/domains/resellerclub.js';
+import { SUPPORTED_TLDS, priceForTld } from './src/domains/pricing.js';
 import { seedDemoFinance } from './src/admin/seedDemo.js';
 
 dotenv.config();
@@ -166,6 +168,14 @@ async function initDB() {
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS domain_verified BOOLEAN DEFAULT false;
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS domain_verification_token TEXT;
       CREATE INDEX IF NOT EXISTS idx_projects_custom_domain ON projects(custom_domain) WHERE custom_domain IS NOT NULL;
+
+      -- Domain purchased through Capable (via the ResellerClub reseller API) vs.
+      -- bring-your-own — domain_registered_via is NULL for BYO domains, which
+      -- still go through the manual TXT/CNAME verify flow above.
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS domain_registered_via TEXT;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS domain_order_id TEXT;
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS domain_expires_at TIMESTAMP;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS resellerclub_customer_id TEXT;
 
       -- Capable Blueprint v2.0 columns (spec §2.1)
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS blueprint JSONB;
@@ -1414,6 +1424,59 @@ async function fulfillMemeLicense(buyerId, asset, amountPaid) {
   return clone;
 }
 
+// Runs after Stripe confirms payment for a domain purchase: creates the
+// ResellerClub customer/contact if needed, registers the domain, points its
+// DNS at Capable, and marks the project as live on it — no manual TXT/CNAME
+// step, unlike the bring-your-own-domain flow (the customer paid us
+// specifically to skip that).
+async function fulfillDomainPurchase({ userId, projectId, domain, registrant }) {
+  const { rows: userRows } = await pool.query('SELECT resellerclub_customer_id FROM users WHERE id = $1', [userId]);
+  let customerId = userRows[0]?.resellerclub_customer_id;
+
+  if (!customerId) {
+    const created = await domainRegistrar.ensureCustomer({
+      email: registrant.email,
+      name: registrant.name,
+      address: registrant.address,
+      city: registrant.city,
+      country: registrant.country,
+      zipcode: registrant.zipcode,
+      phoneCc: registrant.phoneCc,
+      phone: registrant.phone,
+      password: crypto.randomBytes(12).toString('hex') + 'aA1!', // never surfaced to the customer
+    });
+    customerId = created?.['customer-id'] || created?.customerid || created;
+    await pool.query('UPDATE users SET resellerclub_customer_id = $1 WHERE id = $2', [customerId, userId]);
+  }
+
+  const contact = await domainRegistrar.ensureContact({
+    customerId,
+    name: registrant.name,
+    email: registrant.email,
+    address: registrant.address,
+    city: registrant.city,
+    country: registrant.country,
+    zipcode: registrant.zipcode,
+    phoneCc: registrant.phoneCc,
+    phone: registrant.phone,
+  });
+  const contactId = contact?.['contact-id'] || contact?.contactid || contact;
+
+  const order = await domainRegistrar.registerDomain({
+    domainName: domain, years: 1, customerId, contactId,
+    nameservers: (process.env.RESELLERCLUB_NAMESERVERS || '').split(',').filter(Boolean),
+  });
+  await domainRegistrar.pointDnsAtCapable({ domainName: domain, cnameTarget: APEX_TARGET });
+
+  const orderId = order?.['order-id'] || order?.orderid || order?.entityid || null;
+  await pool.query(
+    `UPDATE projects SET custom_domain = $1, domain_verified = true, domain_registered_via = 'resellerclub',
+       domain_order_id = $2, domain_expires_at = now() + interval '1 year'
+     WHERE id = $3`,
+    [domain, orderId ? String(orderId) : null, projectId]
+  );
+}
+
 // ── Adaptive fund (Workstream F) + adaptive pricing (Workstream G) ────────────
 
 const ADAPTIVE_FUND_RATE = 0.10; // 10% of platform revenue feeds the fund
@@ -1481,6 +1544,25 @@ async function handleStripeEvent(event) {
         if (wrote) {
           const { rows: ar } = await pool.query('SELECT * FROM licensed_assets WHERE id = $1', [obj.metadata.asset_id]);
           if (ar[0]) await fulfillMemeLicense(userId, ar[0], amount); // adopt + pay creator + influence
+        }
+      } else if (obj.mode === 'payment' && obj.metadata?.kind === 'domain_purchase') {
+        const amount = (obj.amount_total || 0) / 100;
+        const projectId = parseInt(obj.metadata?.project_id || '', 10) || null;
+        const domain = obj.metadata?.domain;
+        const wrote = await recordStripeTransaction({
+          userId, type: 'domain_purchase', amount, projectId,
+          description: `Domain purchase: ${domain}`, stripeRef: obj.id,
+        });
+        if (wrote && domain && projectId) {
+          try {
+            const registrant = JSON.parse(obj.metadata.registrant || '{}');
+            await fulfillDomainPurchase({ userId, projectId, domain, registrant });
+          } catch (err) {
+            // Payment already captured — do not silently drop this. Surfaces in
+            // Railway logs; the domain purchase needs manual follow-up until a
+            // retry/alerting path exists.
+            console.error(`Domain purchase fulfillment failed for ${domain} (project ${projectId}):`, err.message);
+          }
         }
       } else if (obj.mode === 'payment' && obj.metadata?.kind === 'quick_site') {
         // Payment now happens right after the customer picks a tier — before
@@ -2081,6 +2163,82 @@ app.delete('/api/projects/:id/domain', authMiddleware, async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// ── Buy a domain through Capable (ResellerClub) ──────────────────────────────
+// Dormant until RESELLERCLUB_RESELLER_ID/RESELLERCLUB_API_KEY are set — search
+// and purchase both report { configured: false } so the frontend falls back to
+// the "buy externally" link instead of a broken flow.
+
+// GET /api/domains/search?q=mystore — availability + price across supported TLDs.
+app.get('/api/domains/search', authMiddleware, async (req, res) => {
+  const q = String(req.query.q || '').trim().toLowerCase();
+  if (!domainRegistrar.isConfigured()) return res.json({ configured: false, results: [] });
+  if (!/^[a-z0-9-]{2,63}$/.test(q)) {
+    return res.status(400).json({ error: 'Enter 2-63 letters, numbers, or hyphens (no spaces or dots).' });
+  }
+  try {
+    const data = await domainRegistrar.checkAvailability(q, SUPPORTED_TLDS);
+    const results = SUPPORTED_TLDS.map((tld) => {
+      const entry = data[`${q}.${tld}`] || data[`${q}.${tld}`.toUpperCase()] || {};
+      return {
+        domain: `${q}.${tld}`,
+        tld,
+        available: entry.status === 'available',
+        price: priceForTld(tld),
+      };
+    });
+    res.json({ configured: true, results });
+  } catch (err) {
+    res.status(502).json({ error: 'Domain search failed', details: err.message });
+  }
+});
+
+// POST /api/domains/purchase — { project_id, domain, registrant: {name,email,phone,phoneCc,country,city,address,zipcode} }
+// Charges the customer via Stripe Checkout; the domain is only actually
+// registered once the webhook confirms payment (see handleStripeEvent, kind
+// 'domain_purchase').
+app.post('/api/domains/purchase', authMiddleware, async (req, res) => {
+  if (!domainRegistrar.isConfigured()) return res.status(503).json({ error: 'Domain purchasing is not configured yet.' });
+  if (!stripe) return res.status(503).json({ error: 'Payments are not configured.' });
+  try {
+    const { project_id, domain, registrant } = req.body || {};
+    const tld = String(domain || '').split('.').slice(1).join('.');
+    if (!SUPPORTED_TLDS.includes(tld)) return res.status(400).json({ error: 'Unsupported TLD' });
+    const price = priceForTld(tld);
+
+    const { rows: pr } = await pool.query('SELECT id FROM projects WHERE id = $1 AND user_id = $2', [project_id, req.user.id]);
+    if (!pr[0]) return res.status(404).json({ error: 'Project not found' });
+
+    const required = ['name', 'email', 'phone', 'phoneCc', 'country', 'city', 'address', 'zipcode'];
+    if (!registrant || required.some((k) => !String(registrant[k] || '').trim())) {
+      return res.status(400).json({ error: 'Missing registrant contact details', required });
+    }
+
+    const customer = await getOrCreateCustomer(req.user.id);
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      customer,
+      line_items: [{
+        quantity: 1,
+        price_data: {
+          currency: 'usd',
+          unit_amount: Math.round(price * 100),
+          product_data: { name: `Domain: ${domain}`, metadata: { domain } },
+        },
+      }],
+      client_reference_id: String(req.user.id),
+      metadata: {
+        user_id: String(req.user.id), kind: 'domain_purchase', project_id: String(project_id),
+        domain, registrant: JSON.stringify(registrant),
+      },
+      success_url: `${FRONTEND_URL}/project/${project_id}?checkout=success`,
+      cancel_url: `${FRONTEND_URL}/project/${project_id}?checkout=cancel`,
+    });
+    res.json({ url: session.url });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to start domain purchase', details: err.message });
   }
 });
 
@@ -3249,6 +3407,7 @@ CRITICAL RULES:
 - Use Tailwind CSS via CDN in HTML files: <script src="https://cdn.tailwindcss.com"></script>
 - Make the output visually stunning, modern, and professional.
 - EDITING: When a prior message contains the current project's files, you are EDITING that existing project, NOT building a new one. Apply ONLY the requested change and return ONLY the files you actually modify or add — each with its FULL, complete content — as {"files":[...]}. Do NOT return files you did not touch. Never invent a new site or alter the content, structure, branding, or business domain that the user did not ask you to change. If the request only touches one file, return only that one file.
+- CONTACT/LEAD FORMS: any <form> the site owner would use to hear from a customer (contact, booking, order, quote request, etc.) is auto-captured server-side — no JS needed from you — but ONLY if every input has a "name" attribute from this exact set: name="name", name="email", name="phone", name="message" (use "email"/"phone" only for a field actually meant to collect that; use "message" for the free-text details/order field). The placeholder/label text can be in Arabic or whatever language the site uses — only the "name" attribute itself must be one of those exact English words, or the submission cannot be linked to a customer to contact back. Never leave a contact-form input without a name attribute.
 - DO NOT wrap the JSON in markdown fences, output ONLY raw JSON.`;
 
 // Parse {files:[...]} from a raw model string, salvaging complete file objects

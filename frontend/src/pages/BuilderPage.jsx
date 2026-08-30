@@ -47,6 +47,8 @@ CODE GENERATION RULES
 
 7. QUALITY: Complete HTML (html/head/body/closing tags), 200+ lines, no [INSERT TEXT] placeholders.
 
+8. CONTACT/LEAD FORMS: any <form> meant for a customer to reach the business (contact, booking, order, quote request, etc.) is auto-captured server-side — no JS needed from you — but ONLY if every input has a "name" attribute from this exact set: name="name", name="email", name="phone", name="message" (use "email"/"phone" only for a field actually meant to collect that; use "message" for the free-text details/order field). Placeholder/label text can be in Arabic or whatever language the site uses — only the "name" attribute itself must be one of those exact English words, or the submission can't be linked back to a customer to contact. Never leave a contact-form input without a name attribute.
+
 EDIT MODE: When user asks to modify existing code, return COMPLETE updated HTML with only the requested change. Confirm what changed in "message".
 
 NEVER: return plain text, use markdown fences around entire response, return partial code, use Lorem Ipsum, return code under 200 lines.`;

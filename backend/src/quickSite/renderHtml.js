@@ -111,8 +111,12 @@ const BLOCK_RENDERERS = {
       ? `https://wa.me/${digits}?text=${encodeURIComponent(isRtl ? 'مرحبا، أود الاستفسار' : 'Hello, I have a question')}`
       : null;
     const fields = (c.fields || []).map((f, i) => {
-      const name = /mail|بريد/i.test(f) ? 'email' : /phone|هاتف|جوال|واتس/i.test(f) ? 'phone' : /name|اسم/i.test(f) ? 'name' : `field_${i}`;
-      return `<input name="${name}" placeholder="${escapeHtml(f)}" class="w-full px-4 py-3 border border-slate-200 focus:outline-none focus:border-slate-400" style="border-radius:var(--radius)">`;
+      const isMessage = /message|رسال|تفاصيل|ملاحظ|details|comment|note/i.test(f);
+      const name = /mail|بريد/i.test(f) ? 'email' : /phone|هاتف|جوال|واتس/i.test(f) ? 'phone' : /name|اسم/i.test(f) ? 'name' : isMessage ? 'message' : `field_${i}`;
+      const cls = 'w-full px-4 py-3 border border-slate-200 focus:outline-none focus:border-slate-400';
+      return isMessage
+        ? `<textarea name="${name}" rows="4" placeholder="${escapeHtml(f)}" class="${cls}" style="border-radius:var(--radius)"></textarea>`
+        : `<input name="${name}" placeholder="${escapeHtml(f)}" class="${cls}" style="border-radius:var(--radius)">`;
     }).join('');
     return `<section id="contact" class="py-20">
       <div class="max-w-3xl mx-auto px-6">
