@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
-import { Sparkles, Send, Code2, Eye, Loader, Save, AlertCircle, CheckCircle, Clock, ChevronDown, ChevronUp, Zap, Settings, X, Plus, FileCode, FileType2, FileJson, Camera, Globe, ShieldCheck, ShoppingBag, Users, ChevronRight, FolderOpen } from 'lucide-react';
+import { Sparkles, Send, Code2, Eye, Loader, Save, AlertCircle, CheckCircle, Clock, ChevronDown, ChevronUp, Zap, Settings, X, Plus, FileCode, FileType2, FileJson, Camera, Globe, ShieldCheck, Users, ChevronRight, FolderOpen } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { useLang } from '../i18n/LangContext.jsx';
 import LangToggle from '../components/LangToggle.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
 import Logo from '../components/Logo.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
-import { NAMECHEAP_AFFILIATE_URL } from '../utils/site.js';
 import DnsRow from '../components/DnsRow.jsx';
+import DomainSearchBuy from '../components/DomainSearchBuy.jsx';
 
 // Model tiers (same engine as the Builder). Higher tiers cost more but review harder.
 const EDITOR_TIERS = [
@@ -836,18 +836,9 @@ export default function Editor() {
                         </div>
 
                         {!customDomain && (
-                          <>
-                            <p className="text-xs text-slate-500 mb-2">
-                              {t('lang') === 'ar' ? 'أدخل نطاقك أعلاه وسنُعطيك إعدادات DNS اللازمة.' : 'Enter your domain above and we will give you the DNS records to set.'}
-                            </p>
-                            <a
-                              href={NAMECHEAP_AFFILIATE_URL} target="_blank" rel="noreferrer"
-                              className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-500 dark:text-indigo-300 hover:underline"
-                            >
-                              <Globe size={12} />
-                              {t('lang') === 'ar' ? 'ليس لديك نطاق؟ اشترِ واحداً عبر Namecheap' : "Don't have a domain? Buy one via Namecheap"}
-                            </a>
-                          </>
+                          <p className="text-xs text-slate-500 mb-2">
+                            {t('lang') === 'ar' ? 'أدخل نطاقك أعلاه وسنُعطيك إعدادات DNS اللازمة.' : 'Enter your domain above and we will give you the DNS records to set.'}
+                          </p>
                         )}
 
                         {/* DNS instructions */}
@@ -890,32 +881,7 @@ export default function Editor() {
                         )}
                       </div>
 
-                      {/* Buy a domain placeholder */}
-                      <div className="bg-gradient-to-br from-indigo-900/30 to-purple-900/30 border border-indigo-700/30 rounded-2xl p-4">
-                        <div className="flex items-start justify-between mb-3 gap-3">
-                          <div>
-                            <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                              <ShoppingBag size={15} className="text-indigo-300" />
-                              {t('lang') === 'ar' ? 'ليس لديك دومين؟' : "Don't have a domain?"}
-                            </h4>
-                            <p className="text-xs text-slate-400 mt-1">
-                              {t('lang') === 'ar' ? 'اشترِ دومين عبر Capable واحصل على ربط فوري وSSL مجاني.' : 'Buy a domain through Capable with instant setup and free SSL.'}
-                            </p>
-                          </div>
-                          <span className="bg-amber-500/20 text-amber-300 text-[10px] font-bold px-2 py-1 rounded-full whitespace-nowrap">PRO</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 mb-3 text-xs">
-                          {[['.com', 12], ['.app', 18], ['.io', 39], ['.dev', 14]].map(([tld, price]) => (
-                            <div key={tld} className="bg-slate-900/60 rounded-lg px-3 py-2 flex justify-between items-center">
-                              <span className="text-slate-300 font-mono">{tld}</span>
-                              <span className="text-slate-500">${price}/yr</span>
-                            </div>
-                          ))}
-                        </div>
-                        <button disabled className="w-full bg-slate-800/60 text-slate-500 py-2 rounded-lg text-sm font-medium cursor-not-allowed">
-                          {t('lang') === 'ar' ? 'قريباً' : 'Coming soon'}
-                        </button>
-                      </div>
+                      <DomainSearchBuy projectId={id} authFetch={authFetch} lang={t('lang')} canPremium={domainsAllowed} />
                     </div>
                   )}
                 </div>
