@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { X, Sparkles, Globe, Lock, DollarSign, Wand2, ExternalLink, AlertTriangle } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { X, Sparkles, Globe, Lock, DollarSign, Wand2, ExternalLink, AlertTriangle, Zap } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -17,6 +17,7 @@ export default function NewProjectModal({ isOpen, onClose }) {
   const [price, setPrice] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showUpgrade, setShowUpgrade] = useState(false);
   const [result, setResult] = useState(null); // { url, project_id }
 
   if (!isOpen) return null;
@@ -33,6 +34,7 @@ export default function NewProjectModal({ isOpen, onClose }) {
 
     setLoading(true);
     setError('');
+    setShowUpgrade(false);
     try {
       const res = await authFetch('/api/blueprint/generate', {
         method: 'POST',
@@ -40,7 +42,15 @@ export default function NewProjectModal({ isOpen, onClose }) {
       });
       const data = await res.json();
       if (!res.ok) {
-        if (res.status === 429) throw new Error(lang === 'ar' ? 'تم بلوغ حد الاستخدام. قم بالترقية للمتابعة.' : 'Usage limit reached. Upgrade to continue.');
+        if (res.status === 429) {
+          setShowUpgrade(user?.plan !== 'enterprise');
+          if (data.reason === 'projects') {
+            throw new Error(lang === 'ar'
+              ? `وصلت للحد الأقصى لعدد المشاريع في باقتك الحالية (${data.projects_limit}). رقِّ الباقة لإنشاء المزيد.`
+              : `You've reached your plan's project limit (${data.projects_limit}). Upgrade to create more.`);
+          }
+          throw new Error(lang === 'ar' ? 'تم بلوغ حد التوليد اليومي. قم بالترقية للمتابعة.' : 'Daily generation limit reached. Upgrade to continue.');
+        }
         if (res.status === 422) throw new Error(lang === 'ar' ? 'تعذّر توليد تصميم صالح. حاول بوصف أوضح.' : 'Could not generate a valid design. Try a clearer prompt.');
         throw new Error(data.error || 'Generation failed');
       }
@@ -60,6 +70,8 @@ export default function NewProjectModal({ isOpen, onClose }) {
     }
 
     setLoading(true);
+    setError('');
+    setShowUpgrade(false);
     try {
       const res = await authFetch('/api/projects', {
         method: 'POST',
@@ -72,13 +84,23 @@ export default function NewProjectModal({ isOpen, onClose }) {
         }),
       });
 
-      if (!res.ok) throw new Error('Failed to create project');
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 429 && data.reason === 'projects') {
+          setShowUpgrade(user?.plan !== 'enterprise');
+          throw new Error(lang === 'ar'
+            ? `وصلت للحد الأقصى لعدد المشاريع في باقتك الحالية (${data.projects_limit}). رقِّ الباقة لإنشاء المزيد.`
+            : `You've reached your plan's project limit (${data.projects_limit}). Upgrade to create more.`);
+        }
+        throw new Error(lang === 'ar' ? 'تعذّر إنشاء المشروع.' : 'Failed to create project.');
+      }
 
       const newProject = await res.json();
       onClose();
       navigate(`/editor/${newProject.id}`);
     } catch (err) {
-      console.error(err);
+      setError(err.message);
+    } finally {
       setLoading(false);
     }
   };
@@ -178,7 +200,17 @@ export default function NewProjectModal({ isOpen, onClose }) {
 
             {error && (
               <div className="flex items-start gap-2 text-sm text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
-                <AlertTriangle size={16} className="mt-0.5 shrink-0" /> <span>{error}</span>
+                <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                <span className="flex-1">{error}</span>
+                {showUpgrade && (
+                  <Link
+                    to="/influence"
+                    onClick={closeAndReset}
+                    className="shrink-0 inline-flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold"
+                  >
+                    <Zap size={12} /> {lang === 'ar' ? 'الترقية' : 'Upgrade'}
+                  </Link>
+                )}
               </div>
             )}
 
@@ -292,16 +324,32 @@ export default function NewProjectModal({ isOpen, onClose }) {
             )}
           </div>
 
+          {error && (
+            <div className="flex items-start gap-2 text-sm text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-xl p-3">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <span className="flex-1">{error}</span>
+              {showUpgrade && (
+                <Link
+                  to="/influence"
+                  onClick={closeAndReset}
+                  className="shrink-0 inline-flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold"
+                >
+                  <Zap size={12} /> {lang === 'ar' ? 'الترقية' : 'Upgrade'}
+                </Link>
+              )}
+            </div>
+          )}
+
           {/* Actions */}
           <div className="pt-2 flex justify-end gap-3">
-            <button 
+            <button
               type="button"
-              onClick={onClose} 
+              onClick={onClose}
               className="px-6 py-3 text-slate-300 hover:text-white text-sm font-bold transition-colors"
             >
               {lang === 'ar' ? 'إلغاء' : 'Cancel'}
             </button>
-            <button 
+            <button
               type="submit" 
               disabled={loading}
               className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 text-white px-8 py-3 rounded-xl text-sm font-bold shadow-lg shadow-indigo-500/20 flex items-center gap-2 transition-all"

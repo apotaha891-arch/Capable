@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import {
   LayoutDashboard, BarChart3, Inbox, Settings as SettingsIcon, ArrowLeft,
   Globe, Eye, Heart, Users, ExternalLink, Mail, Phone, MessageSquare, Pencil,
-  HelpCircle, Upload, X as XIcon, Lock, Tag, EyeOff,
+  HelpCircle, Upload, X as XIcon, Lock, Tag, EyeOff, ShieldCheck, Loader, CheckCircle, AlertCircle,
 } from 'lucide-react';
 import { useLang } from '../i18n/LangContext.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -11,6 +11,7 @@ import LangToggle from '../components/LangToggle.jsx';
 import { StatCard, Spinner, LineChart, tt } from '../admin/AdminShared.jsx';
 import { siteUrl, NAMECHEAP_AFFILIATE_URL } from '../utils/site.js';
 import { hostedUrl } from '../utils/api.js';
+import DnsRow from '../components/DnsRow.jsx';
 
 export default function ProjectPanel() {
   const { id } = useParams();
@@ -131,8 +132,8 @@ function Overview({ project, liveUrl, lang, authFetch, reload }) {
 
         <p className="mt-3 text-xs text-slate-500">
           {tt(lang,
-            'Free, unlimited publishing on a Capable link (with a "Made with Capable" badge). Want your own domain? Connect a custom domain from the editor — that\'s the paid upgrade.',
-            'نشر مجاني وغير محدود على رابط كيبابل (مع بادج «تم إنشاؤه على كيبابل»). تريد نطاقك الخاص؟ اربط نطاقاً مخصصاً من المحرّر — تلك هي الترقية المدفوعة.')}
+            'Free, unlimited publishing on a Capable link (with a "Made with Capable" badge). Want your own domain? Connect one from the Settings tab — that\'s the paid upgrade.',
+            'نشر مجاني وغير محدود على رابط كيبابل (مع بادج «تم إنشاؤه على كيبابل»). تريد نطاقك الخاص؟ اربطه من تبويب الإعدادات — تلك هي الترقية المدفوعة.')}
         </p>
       </div>
 
@@ -235,6 +236,17 @@ function Leads({ id, lang, authFetch }) {
                     {l.phone && <span className="flex items-center gap-1"><Phone size={12} /> {l.phone}</span>}
                   </div>
                   {l.message && <p className="text-sm text-slate-300 mt-2 flex items-start gap-1.5"><MessageSquare size={13} className="mt-0.5 shrink-0 text-slate-500" /> {l.message}</p>}
+                  {!l.email && !l.phone && !l.message && l.data && Object.keys(l.data).length > 0 && (
+                    <div className="mt-2 space-y-0.5 bg-slate-950/50 border border-slate-800 rounded-lg px-2.5 py-2">
+                      <p className="text-[10px] uppercase tracking-wide text-slate-600">
+                        {tt(lang, "Couldn't auto-detect contact fields — raw form data:", 'تعذّر تحديد حقول التواصل تلقائياً — بيانات النموذج كما وردت:')}
+                      </p>
+                      {Object.entries(l.data).map(([k, v]) => (
+                        <p key={k} className="text-sm text-slate-300"><span className="text-slate-500">{k}:</span> {String(v)}</p>
+                      ))}
+                    </div>
+                  )}
+                  {l.source_path && <p className="text-[11px] text-slate-600 mt-1.5">{tt(lang, 'From', 'من')}: {l.source_path}</p>}
                 </div>
                 <span className="text-[11px] text-slate-500 shrink-0">{new Date(l.created_at).toLocaleString()}</span>
               </div>
@@ -315,6 +327,59 @@ function SettingsTab({ project, lang, authFetch, reload, t }) {
     e.preventDefault();
     await authFetch(`/api/projects/${project.id}`, { method: 'PUT', body: JSON.stringify(form) });
     setSaved(true); setTimeout(() => setSaved(false), 1800); reload();
+  };
+
+  // ── custom-domain DNS instructions + verification ─────────────────────
+  // The saved (persisted) domain is what /domain/instructions reads from the
+  // DB — not the possibly-unsaved `form.custom_domain` — so these only apply
+  // once the domain above has actually been saved.
+  const [domainInfo, setDomainInfo] = useState(null);
+  const [domainBusy, setDomainBusy] = useState(false);
+  const [domainMsg, setDomainMsg] = useState(null);
+  const domainSaved = project.custom_domain && project.custom_domain === form.custom_domain;
+
+  useEffect(() => {
+    if (domainSaved && !domainInfo) fetchDomainInfo();
+    if (!domainSaved) setDomainInfo(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [domainSaved]);
+
+  const fetchDomainInfo = async () => {
+    setDomainBusy(true); setDomainMsg(null);
+    try {
+      const res = await authFetch(`/api/projects/${project.id}/domain/instructions`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      setDomainInfo(data);
+    } catch (err) {
+      setDomainMsg({ type: 'error', text: err.message });
+    } finally {
+      setDomainBusy(false);
+    }
+  };
+
+  const handleCheckDomain = async () => {
+    setDomainBusy(true); setDomainMsg(null);
+    try {
+      const res = await authFetch(`/api/projects/${project.id}/domain/check`, { method: 'POST' });
+      const data = await res.json();
+      if (data.verified) {
+        setDomainMsg({ type: 'success', text: tt(lang, '✓ Domain verified successfully', '✓ تم التحقق من الدومين بنجاح') });
+        setDomainInfo(prev => prev ? { ...prev, verified: true } : prev);
+      } else {
+        setDomainMsg({ type: 'error', text: data.error || tt(lang, 'Matching TXT record not found', 'لم نجد سجل TXT المطابق') });
+      }
+    } catch (err) {
+      setDomainMsg({ type: 'error', text: err.message });
+    } finally {
+      setDomainBusy(false);
+    }
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard?.writeText(text);
+    setDomainMsg({ type: 'success', text: tt(lang, 'Copied', 'تم النسخ') });
+    setTimeout(() => setDomainMsg(null), 1500);
   };
 
   // Upload the OG image straight from the user's computer — no hosting/URL needed.
@@ -456,13 +521,27 @@ function SettingsTab({ project, lang, authFetch, reload, t }) {
         <span className="text-xs text-slate-400 flex items-center gap-1.5 flex-wrap">
           {tt(lang, 'Custom domain', 'دومين مخصص')}
           <PremiumBadge lang={lang} />
+          {domainInfo?.verified && (
+            <span className="bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1">
+              <ShieldCheck size={10} /> {tt(lang, 'Verified', 'مُتحقق')}
+            </span>
+          )}
+          {domainSaved && domainInfo && !domainInfo.verified && (
+            <span className="bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[10px] font-semibold px-2 py-0.5 rounded-full">
+              {tt(lang, 'Pending', 'بانتظار التحقق')}
+            </span>
+          )}
         </span>
         <input value={form.custom_domain} onChange={set('custom_domain')} placeholder="example.com" disabled={!canPremium}
           className={`mt-1 w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none ${canPremium ? '' : 'opacity-60 cursor-not-allowed'}`} />
         <p className="text-[11px] text-slate-600 mt-1">
-          {canPremium
-            ? tt(lang, 'Point your domain’s DNS to Capable, then verify from the editor.', 'وجّه DNS للدومين إلى Capable ثم فعّله من المحرّر.')
-            : tt(lang, 'Connect your own domain (e.g. yourstore.com) on a higher plan.', 'اربط دومينك الخاص (مثل yourstore.com) عند الترقية لباقة أعلى.')}
+          {!canPremium
+            ? tt(lang, 'Connect your own domain (e.g. yourstore.com) on a higher plan.', 'اربط دومينك الخاص (مثل yourstore.com) عند الترقية لباقة أعلى.')
+            : !form.custom_domain
+            ? tt(lang, "Enter your domain and click Save below — we'll give you the DNS records to set.", 'أدخل نطاقك واضغط "حفظ" أدناه — وسنُعطيك إعدادات DNS اللازمة.')
+            : !domainSaved
+            ? tt(lang, 'Click Save below to apply this domain, then we’ll show the DNS records to add.', 'اضغط "حفظ" أدناه لتطبيق هذا النطاق، وسنعرض لك سجلّات DNS المطلوبة.')
+            : null}
         </p>
         {canPremium && !form.custom_domain && (
           <a
@@ -472,6 +551,37 @@ function SettingsTab({ project, lang, authFetch, reload, t }) {
             <Globe size={11} />
             {tt(lang, "Don't have a domain? Buy one via Namecheap", 'ليس لديك نطاق؟ اشترِ واحداً عبر Namecheap')}
           </a>
+        )}
+
+        {/* DNS instructions — only once the domain above is actually saved. */}
+        {domainSaved && domainInfo && (
+          <div className="space-y-2.5 mt-3">
+            <p className="text-[11px] text-slate-500">
+              {tt(lang, 'Add these two records at your domain registrar, then click Verify.', 'أضف هذين السجلّين لدى مسجّل نطاقك، ثم اضغط "تحقق".')}
+            </p>
+            <DnsRow label="TXT" host={domainInfo.verification.host} value={domainInfo.verification.value} onCopy={copyToClipboard} />
+            <DnsRow label="CNAME" host={domainInfo.pointing.host} value={domainInfo.pointing.value} onCopy={copyToClipboard} />
+            <div className="flex items-center gap-2 pt-0.5">
+              <button
+                type="button" onClick={handleCheckDomain} disabled={domainBusy}
+                className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5"
+              >
+                {domainBusy ? <Loader className="animate-spin" size={12} /> : <ShieldCheck size={12} />}
+                {domainInfo.verified ? tt(lang, 'Re-check', 'إعادة التحقق') : tt(lang, 'Verify domain', 'تحقق من الدومين')}
+              </button>
+              {domainInfo.verified && (
+                <a href={`http://${form.custom_domain}`} target="_blank" rel="noreferrer" className="text-emerald-400 text-xs hover:underline">
+                  http://{form.custom_domain}
+                </a>
+              )}
+            </div>
+            {domainMsg && (
+              <div className={`text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 ${domainMsg.type === 'success' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                {domainMsg.type === 'success' ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
+                {domainMsg.text}
+              </div>
+            )}
+          </div>
         )}
       </div>
 

@@ -1084,6 +1084,21 @@ app.post('/api/projects', authMiddleware, async (req, res) => {
     const { name, description, thumbnail_url, price, code = '', is_public = false } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
 
+    // Enforce the plan's project cap here too — this is the shared creation path
+    // for both the "blank project" flow and the /builder page's publish step, so
+    // without this check a user could bypass /api/blueprint/generate's own
+    // projects_limit gate simply by creating projects through this route instead.
+    const { rows: planRows } = await pool.query('SELECT plan FROM users WHERE id = $1', [req.user.id]);
+    const quota = await getUsage(pool, req.user.id, planRows[0]?.plan);
+    if (quota.projects_limit != null && quota.projects_count >= quota.projects_limit) {
+      return res.status(429).json({
+        error: 'Project limit reached',
+        reason: 'projects',
+        ...quota,
+        upgrade_required: planRows[0]?.plan === 'free',
+      });
+    }
+
     const { rows } = await pool.query(
       'INSERT INTO projects (user_id, name, description, thumbnail_url, price, code, author, is_public, last_edited) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW()) RETURNING *',
       [req.user.id, name, description || null, thumbnail_url || null, price || 0, code, req.user.name, is_public]
@@ -3668,11 +3683,21 @@ app.post('/api/leads/:slug', async (req, res) => {
 
     const f = { ...(req.body?.fields || {}), ...req.body };
     delete f.fields; delete f.source;
-    const find = (re) => Object.entries(f).find(([k, v]) => re.test(k) || (typeof v === 'string' && re.test(v)))?.[1];
-    const email = find(/email|@/i);
-    const name = f.name || f.full_name || f.fullname || f.fullName;
-    const phone = f.phone || f.tel || f.mobile || f.whatsapp;
-    const message = f.message || f.msg || f.comment || f.text || f.note;
+    const entries = Object.entries(f);
+    // AI-generated sites are Arabic-first, so form field names (the FormData key,
+    // i.e. the input's `name` attribute) are often Arabic rather than "email"/
+    // "phone"/etc. — match on Arabic labels too, not just English ones.
+    const find = (re) => entries.find(([k, v]) => re.test(k) || (typeof v === 'string' && re.test(v)))?.[1];
+    const email = find(/email|بريد|@/i);
+    const name = f.name || f.full_name || f.fullname || f.fullName || find(/^(name|الاسم|اسم)/i);
+    let phone = f.phone || f.tel || f.mobile || f.whatsapp || find(/phone|tel|mobile|whatsapp|جوال|هاتف|واتساب|رقم/i);
+    // Last resort: a value that's mostly digits (a phone number) even under an
+    // unrecognized key, so digit-only submissions still surface as a phone.
+    if (!phone) {
+      const digits = entries.find(([, v]) => typeof v === 'string' && /^[\d\s+()-]{7,}$/.test(v.trim()) && v.replace(/\D/g, '').length >= 7);
+      phone = digits?.[1];
+    }
+    const message = f.message || f.msg || f.comment || f.text || f.note || find(/message|رسال|ملاحظ|تفاصيل|comment/i);
 
     await pool.query(
       `INSERT INTO leads (project_id, name, email, phone, message, data, source_path)

@@ -175,6 +175,7 @@ export default function BuilderPage() {
   const [viewport, setViewport]           = useState('desktop');
   const [copied, setCopied]               = useState(false);
   const [error, setError]                 = useState(null);
+  const [showUpgrade, setShowUpgrade]     = useState(false);
   const [projectTitle, setProjectTitle]   = useState('');
   const [phase, setPhase]                 = useState('input'); // input | builder
   const [savedProjectId, setSavedProjectId] = useState(projectId || null);
@@ -383,6 +384,8 @@ export default function BuilderPage() {
     let id = projectId || savedProjectId;
     if (!id) {
       setPublishing(true);
+      setError(null);
+      setShowUpgrade(false);
       try {
         const res = await authFetch('/api/projects', {
           method: 'POST',
@@ -391,12 +394,21 @@ export default function BuilderPage() {
             code: generatedCode,
           }),
         });
-        if (!res.ok) throw new Error('create failed');
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          if (res.status === 429 && d.reason === 'projects') {
+            setShowUpgrade(user?.plan !== 'enterprise');
+            throw new Error(isRTL
+              ? `وصلت للحد الأقصى لعدد المشاريع في باقتك الحالية (${d.projects_limit}). رقِّ الباقة لإنشاء المزيد.`
+              : `You've reached your plan's project limit (${d.projects_limit}). Upgrade to create more.`);
+          }
+          throw new Error(isRTL ? 'تعذّر حفظ المشروع. حاول مجدداً.' : 'Could not save the project. Try again.');
+        }
         const proj = await res.json();
         id = proj.id;
         setSavedProjectId(id);
-      } catch {
-        setError(isRTL ? 'تعذّر حفظ المشروع. حاول مجدداً.' : 'Could not save the project. Try again.');
+      } catch (err) {
+        setError(err.message);
         setPublishing(false);
         return;
       }
@@ -675,7 +687,15 @@ export default function BuilderPage() {
           {error && (
             <div className="mx-3 mb-2 p-2.5 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-2">
               <AlertCircle size={13} className="text-red-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-red-300 leading-relaxed">{error}</p>
+              <p className="text-xs text-red-300 leading-relaxed flex-1">{error}</p>
+              {showUpgrade && (
+                <Link
+                  to="/influence"
+                  className="shrink-0 inline-flex items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded-lg text-xs font-bold"
+                >
+                  <Zap size={11} /> {isRTL ? 'الترقية' : 'Upgrade'}
+                </Link>
+              )}
               <button onClick={() => setError(null)} className="ms-auto text-red-400 hover:text-red-300">
                 <X size={12} />
               </button>
