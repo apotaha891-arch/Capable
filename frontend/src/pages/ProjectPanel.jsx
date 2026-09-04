@@ -271,9 +271,19 @@ function Leads({ id, lang, authFetch }) {
                     <span className="font-semibold text-white">{l.name || tt(lang, 'Anonymous', 'بدون اسم')}</span>
                     {!l.is_read && <span className="w-2 h-2 rounded-full bg-indigo-400" />}
                   </div>
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs text-slate-400">
-                    {l.email && <span className="flex items-center gap-1"><Mail size={12} /> {l.email}</span>}
-                    {l.phone && <span className="flex items-center gap-1"><Phone size={12} /> {l.phone}</span>}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-1 text-xs">
+                    {l.email && (
+                      <a href={`mailto:${l.email}`} onClick={e => e.stopPropagation()}
+                        className="flex items-center gap-1 text-indigo-400 hover:text-indigo-300 hover:underline">
+                        <Mail size={12} /> {l.email}
+                      </a>
+                    )}
+                    {l.phone && (
+                      <a href={`https://wa.me/${String(l.phone).replace(/\D/g, '')}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}
+                        className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 hover:underline">
+                        <Phone size={12} /> {l.phone} · {tt(lang, 'WhatsApp', 'واتساب')}
+                      </a>
+                    )}
                   </div>
                   {l.message && <p className="text-sm text-slate-300 mt-2 flex items-start gap-1.5"><MessageSquare size={13} className="mt-0.5 shrink-0 text-slate-500" /> {l.message}</p>}
                   {!l.email && !l.phone && !l.message && l.data && Object.keys(l.data).length > 0 && (
@@ -281,9 +291,22 @@ function Leads({ id, lang, authFetch }) {
                       <p className="text-[10px] uppercase tracking-wide text-slate-600">
                         {tt(lang, "Couldn't auto-detect contact fields — raw form data:", 'تعذّر تحديد حقول التواصل تلقائياً — بيانات النموذج كما وردت:')}
                       </p>
-                      {Object.entries(l.data).map(([k, v]) => (
-                        <p key={k} className="text-sm text-slate-300"><span className="text-slate-500">{k}:</span> {String(v)}</p>
-                      ))}
+                      {Object.entries(l.data).map(([k, v]) => {
+                        const val = String(v);
+                        const isEmail = /@/.test(val);
+                        const digits = val.replace(/\D/g, '');
+                        const isPhone = !isEmail && digits.length >= 7 && digits.length === val.replace(/[\s()+-]/g, '').length;
+                        return (
+                          <p key={k} className="text-sm text-slate-300">
+                            <span className="text-slate-500">{k}:</span>{' '}
+                            {isEmail ? (
+                              <a href={`mailto:${val}`} onClick={e => e.stopPropagation()} className="text-indigo-400 hover:text-indigo-300 hover:underline">{val}</a>
+                            ) : isPhone ? (
+                              <a href={`https://wa.me/${digits}`} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-emerald-400 hover:text-emerald-300 hover:underline">{val}</a>
+                            ) : val}
+                          </p>
+                        );
+                      })}
                     </div>
                   )}
                   {l.source_path && <p className="text-[11px] text-slate-600 mt-1.5">{tt(lang, 'From', 'من')}: {l.source_path}</p>}
