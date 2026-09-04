@@ -486,11 +486,12 @@ function SettingsTab({ project, lang, authFetch, reload, t }) {
             hintText={tt(lang,
               'This is the headline Google and browser tabs show for your site. Use a short, clear name with what you offer, e.g. “Elite Store — Smart Watches & Electronics”.',
               'هذا هو العنوان الذي يظهر لموقعك في نتائج جوجل وفي تبويبات المتصفح. اكتب اسماً قصيراً وواضحاً يوضّح ما تقدّمه، مثل: «متجر النخبة — ساعات ذكية وإلكترونيات».')} />
-          <Field label={tt(lang, 'Search keywords', 'كلمات البحث المفتاحية')} value={form.seo_description} onChange={set('seo_description')} textarea
+          <Field label={tt(lang, 'Meta description', 'وصف الموقع (ميتا)')} value={form.seo_description} onChange={set('seo_description')} textarea
+            ph={tt(lang, 'Short summary shown under your title in search results', 'ملخص قصير يظهر تحت عنوان موقعك في نتائج البحث')}
             hintId="seo_description" {...hintProps}
             hintText={tt(lang,
-              'These are the words your customers type into Google to find a business like yours. Write a short sentence using those words, e.g. “online electronics store, smart watches, fast delivery, best prices”. The clearer it is, the easier people find you.',
-              'هذه هي الكلمات التي يكتبها عملاؤك في جوجل ليجدوا متجراً مثل متجرك. اكتب جملة قصيرة تستخدم هذه الكلمات، مثل: «متجر إلكترونيات أونلاين، ساعات ذكية، توصيل سريع، أفضل الأسعار». كلما كانت أوضح، كان وصول الناس إليك أسهل.')} />
+              'This is the short snippet Google shows under your title — it’s what makes people click your link instead of a competitor’s. Write 1–2 sentences that naturally include what customers search for, e.g. “Online electronics store with smart watches, fast delivery, and the best prices in town.”',
+              'هذا هو المقتطف القصير الذي يظهره جوجل تحت عنوان موقعك، وهو ما يدفع الناس للنقر على رابطك بدلاً من منافسيك. اكتب جملة أو جملتين تتضمّن بشكل طبيعي ما يبحث عنه عملاؤك، مثل: «متجر إلكترونيات أونلاين يقدّم ساعات ذكية، وتوصيل سريع، وأفضل الأسعار في مدينتك».')} />
 
           {/* OG image: upload from computer (URL optional, hidden behind the field) */}
           <div className="block">

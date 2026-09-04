@@ -152,7 +152,7 @@ export const templates = {
             items: [
               { icon: "📢", title: "إعلانات وسائل التواصل", desc: "إطلاق حملات إعلانية ممولة ومستهدفة بدقة على سناب شات، تيك توك، وإنستغرام." },
               { icon: "🎨", title: "صناعة المحتوى الإبداعي", desc: "كتابة نصوص تسويقية مقنعة وتصميم منشورات بصرية تعكس احترافية شركتك." },
-              { icon: "📈", title: "تحسين محركات البحث SEO", desc: "تهيئة موقعك الإلكتروني ليتصدر النتائج الأولى في محرك بحث جوجل مجاناً." }
+              { icon: "📈", title: "تحسين محركات البحث SEO", desc: "تهيئة تقنية شاملة لموقعك مع كلمات مفتاحية مدروسة لرفع ترتيبه في نتائج جوجل وجذب زيارات مستهدفة أكثر." }
             ]
           }
         },
@@ -216,7 +216,7 @@ export const templates = {
             items: [
               { icon: "🎨", title: "UI/UX Design", desc: "Translating complex functional ideas into interactive, visually appealing design screens." },
               { icon: "💻", title: "Frontend Engineering", desc: "Writing accessible, high-performance web code using modern tools like Vite and Tailwind." },
-              { icon: "⚙️", title: "Technical Consulting", desc: "Auditing page load times, responsive UI patterns, and core SEO structure configurations." }
+              { icon: "⚙️", title: "Technical Consulting", desc: "Speed audits, responsive design reviews, and technical SEO fixes that help search engines find and rank your site." }
             ]
           }
         },

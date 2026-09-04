@@ -24,6 +24,8 @@ import { monthlySeries, currentMRR, forecast as buildForecast, cashPosition, rec
 import { deliverCampaign, mailMode, sendMail } from './src/admin/mailer.js';
 import * as domainRegistrar from './src/domains/resellerclub.js';
 import { SUPPORTED_TLDS, priceForTld } from './src/domains/pricing.js';
+import * as adsClients from './src/ads/index.js';
+import { encryptToken, decryptToken } from './src/ads/tokenCrypto.js';
 import { seedDemoFinance } from './src/admin/seedDemo.js';
 
 dotenv.config();
@@ -424,6 +426,24 @@ async function initDB() {
       );
       CREATE INDEX IF NOT EXISTS idx_platform_reviews_created ON platform_reviews(created_at DESC);
 
+      -- Connected social-ads accounts (agency/admin-managed, not per-end-user)
+      -- powering the admin "Social Ads" tab. Access/refresh tokens are
+      -- encrypted at rest — see backend/src/ads/tokenCrypto.js.
+      CREATE TABLE IF NOT EXISTS ad_accounts (
+        id SERIAL PRIMARY KEY,
+        platform TEXT NOT NULL CHECK (platform IN ('meta','tiktok','snapchat')),
+        account_id TEXT NOT NULL,
+        account_name TEXT,
+        access_token TEXT NOT NULL,
+        refresh_token TEXT,
+        token_expires_at TIMESTAMP,
+        connected_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        connected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_error TEXT,
+        last_synced_at TIMESTAMP,
+        UNIQUE(platform, account_id)
+      );
+
       -- Lock down the public PostgREST API. The backend connects as the table
       -- owner via DATABASE_URL and bypasses RLS, so it is unaffected. With RLS
       -- enabled and no policies, the anon/authenticated roles (reachable with the
@@ -449,6 +469,7 @@ async function initDB() {
       ALTER TABLE assistant_messages  ENABLE ROW LEVEL SECURITY;
       ALTER TABLE assistant_leads     ENABLE ROW LEVEL SECURITY;
       ALTER TABLE platform_reviews    ENABLE ROW LEVEL SECURITY;
+      ALTER TABLE ad_accounts         ENABLE ROW LEVEL SECURITY;
 
       -- Forgot-password flow: single-use, hashed, short-lived reset token.
       ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_hash TEXT;
@@ -4302,6 +4323,176 @@ app.post('/api/admin/transactions', authMiddleware, adminMiddleware, async (req,
       [type, amount, description || null]
     );
     res.status(201).json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// ── Social Ads Integrations (Meta/Instagram, TikTok, Snapchat) ─────────────
+// Admin-managed connected ad accounts. Dormant per-platform until that
+// platform's CLIENT_ID/SECRET/REDIRECT_URI env vars are set — /config
+// reports which platforms are available so the admin UI only shows a
+// "Connect" button for platforms that are actually wired up.
+
+const AD_PLATFORMS = ['meta', 'tiktok', 'snapchat'];
+
+function rowToAdAccount(row) {
+  return {
+    id: row.id, platform: row.platform, account_id: row.account_id, account_name: row.account_name,
+    accessToken: decryptToken(row.access_token),
+    refreshToken: row.refresh_token ? decryptToken(row.refresh_token) : null,
+    tokenExpiresAt: row.token_expires_at,
+  };
+}
+
+// GET /api/admin/ads/config — which platforms have credentials set.
+app.get('/api/admin/ads/config', authMiddleware, adminMiddleware, async (req, res) => {
+  const config = {};
+  for (const p of AD_PLATFORMS) config[p] = adsClients.isConfigured(p);
+  res.json(config);
+});
+
+// GET /api/admin/ads/connect/:platform — returns the OAuth URL to redirect the admin to.
+app.get('/api/admin/ads/connect/:platform', authMiddleware, adminMiddleware, async (req, res) => {
+  const { platform } = req.params;
+  if (!AD_PLATFORMS.includes(platform)) return res.status(400).json({ error: 'Unknown platform' });
+  if (!adsClients.isConfigured(platform)) return res.status(503).json({ error: `${platform} ads not configured` });
+  try {
+    const state = jwt.sign({ adminId: req.user.id, platform, nonce: crypto.randomUUID() }, JWT_SECRET, { expiresIn: '10m' });
+    const url = adsClients.CLIENTS[platform].getAuthUrl(state);
+    res.json({ url });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to build connect URL', details: err.message });
+  }
+});
+
+// GET /api/admin/ads/callback/:platform — OAuth redirect target. No authMiddleware:
+// this is a top-level browser navigation from the ad platform, which carries
+// no Authorization header. The signed `state` (minted by /connect above)
+// stands in for auth instead.
+app.get('/api/admin/ads/callback/:platform', async (req, res) => {
+  const { platform } = req.params;
+  const { code, state } = req.query;
+  const fail = (reason) => res.redirect(`${FRONTEND_URL}/admin?tab=ads&error=${reason}`);
+
+  if (!AD_PLATFORMS.includes(platform)) return fail('invalid_platform');
+  let decoded;
+  try {
+    decoded = jwt.verify(state, JWT_SECRET);
+  } catch {
+    return fail('invalid_state');
+  }
+  if (decoded.platform !== platform) return fail('invalid_state');
+
+  try {
+    const { rows: adminRows } = await pool.query('SELECT role, email FROM users WHERE id = $1', [decoded.adminId]);
+    const admin = adminRows[0];
+    if (!admin || (admin.role !== 'admin' && !isAdminEmail(admin.email))) return fail('not_authorized');
+
+    const client = adsClients.CLIENTS[platform];
+    const tokens = await client.exchangeCode(code);
+    const accounts = await client.listAccounts(tokens.access_token);
+    const expiresAt = tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000) : null;
+
+    for (const acc of accounts) {
+      await pool.query(
+        `INSERT INTO ad_accounts (platform, account_id, account_name, access_token, refresh_token, token_expires_at, connected_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (platform, account_id) DO UPDATE SET
+           account_name = EXCLUDED.account_name, access_token = EXCLUDED.access_token,
+           refresh_token = EXCLUDED.refresh_token, token_expires_at = EXCLUDED.token_expires_at,
+           last_error = NULL`,
+        [platform, acc.id, acc.name, encryptToken(tokens.access_token),
+          tokens.refresh_token ? encryptToken(tokens.refresh_token) : null, expiresAt, decoded.adminId]
+      );
+    }
+    res.redirect(`${FRONTEND_URL}/admin?tab=ads&connected=${platform}`);
+  } catch (err) {
+    console.error('Ads OAuth callback failed:', err.message);
+    fail('connect_failed');
+  }
+});
+
+// GET /api/admin/ads/accounts — connected accounts (never returns token columns).
+app.get('/api/admin/ads/accounts', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, platform, account_id, account_name, connected_at, last_error, last_synced_at
+         FROM ad_accounts ORDER BY platform, connected_at DESC`
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// DELETE /api/admin/ads/accounts/:id — disconnect (best-effort; does not call
+// the platform's token-revoke endpoint).
+app.delete('/api/admin/ads/accounts/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    await pool.query('DELETE FROM ad_accounts WHERE id = $1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed', details: err.message });
+  }
+});
+
+// GET /api/admin/ads/metrics?since=&until= — aggregated spend/impressions/
+// clicks/conversions across every connected account, default last 30 days.
+// One account's failure never breaks the rest — see errors[] in the response.
+app.get('/api/admin/ads/metrics', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const until = /^\d{4}-\d{2}-\d{2}$/.test(req.query.until) ? req.query.until : new Date().toISOString().slice(0, 10);
+    const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since)
+      ? req.query.since
+      : new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+
+    const { rows } = await pool.query('SELECT * FROM ad_accounts ORDER BY platform, connected_at DESC');
+
+    const results = await Promise.all(rows.map(async (row) => {
+      let account;
+      try {
+        account = rowToAdAccount(row);
+      } catch (err) {
+        return { accountId: row.id, platform: row.platform, accountName: row.account_name,
+          spend: 0, impressions: 0, clicks: 0, ctr: 0, conversions: 0, campaigns: [], series: [],
+          error: 'Stored credentials could not be decrypted — reconnect this account.' };
+      }
+      const result = await adsClients.fetchAccountMetrics(account, {
+        since, until,
+        onTokenRefreshed: async (accountId, refreshed) => {
+          const expiresAt = refreshed.expires_in ? new Date(Date.now() + refreshed.expires_in * 1000) : null;
+          await pool.query(
+            `UPDATE ad_accounts SET access_token = $1, refresh_token = COALESCE($2, refresh_token), token_expires_at = $3 WHERE id = $4`,
+            [encryptToken(refreshed.access_token), refreshed.refresh_token ? encryptToken(refreshed.refresh_token) : null, expiresAt, accountId]
+          );
+        },
+      });
+      await pool.query('UPDATE ad_accounts SET last_error = $1, last_synced_at = NOW() WHERE id = $2', [result.error, row.id]);
+      return result;
+    }));
+
+    const totals = results.reduce((t, r) => ({
+      spend: t.spend + r.spend, impressions: t.impressions + r.impressions,
+      clicks: t.clicks + r.clicks, conversions: t.conversions + r.conversions,
+    }), { spend: 0, impressions: 0, clicks: 0, conversions: 0 });
+    totals.ctr = totals.impressions > 0 ? totals.clicks / totals.impressions : 0;
+
+    const seriesByDate = new Map();
+    for (const r of results) {
+      for (const s of r.series) seriesByDate.set(s.date, (seriesByDate.get(s.date) || 0) + s.spend);
+    }
+    const series = [...seriesByDate.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, spend]) => ({ date, spend }));
+
+    const errors = results.filter((r) => r.error).map((r) => ({
+      accountId: r.accountId, platform: r.platform, accountName: r.accountName, message: r.error,
+    }));
+
+    res.json({
+      since, until, totals,
+      accounts: results.map(({ error, ...rest }) => rest),
+      series, errors,
+    });
   } catch (err) {
     res.status(500).json({ error: 'Failed', details: err.message });
   }

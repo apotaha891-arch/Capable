@@ -110,7 +110,7 @@ const DEFAULT_SYSTEM_PROJECTS = [
           items: [
             { icon: "✨", title: "Premium UI/UX Design", desc: "Stunning visual mockups, wireframes, and production-ready component code bases." },
             { icon: "🚀", title: "Vite & React Engineering", desc: "Supercharged fast frontend frameworks with highly secure architecture." },
-            { icon: "📈", title: "SEO Optimization", desc: "Boost organic discovery and conversion rates using structure markup models." }
+            { icon: "📈", title: "SEO Optimization", desc: "Improve search rankings and click-through rates with keyword-optimized content and structured data (schema markup)." }
           ]
         }
       },
